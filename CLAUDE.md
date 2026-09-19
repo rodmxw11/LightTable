@@ -8,19 +8,19 @@ Light Table is a code editor built on Electron. The application logic (core obje
 
 ## Build / run commands
 
-Prerequisites: Leiningen 2.1+, node.js + npm, git. On Windows, development is normally done under Cygwin.
+Prerequisites: Leiningen 2.1+, node.js + npm, git, a JDK (17 is the safest match for the pinned `clojure 1.10.3`/`clojurescript 1.10.844`). On Windows, Git Bash/MSYS works directly (the build scripts detect `MINGW*`/`MSYS*` as well as Cygwin's `CYGWIN_NT*`); Cygwin is no longer required. To build with a JDK other than your system default without changing `JAVA_HOME` globally, set `LT_JAVA_HOME` before running `script/build.sh`.
 
 - Full build (installs electron + core node deps, compiles ClojureScript, assembles an app under `builds/`): `script/build.sh`
   - Override output version: `VERSION=0.8.1-pre script/build.sh`
   - Release build: `script/build.sh --release`
 - Faster rebuild after the first full build (skips updating plugins/electron): `script/build-app.sh`
 - Recompile ClojureScript only, after editing `src/`: `lein cljsbuild once app`
-  - On Windows you may need to comment out the `:source-map` line in `project.clj` first (see `doc/developer-install.md`, issue #1025).
+  - On Windows, `script/build.sh` handles the `:source-map` workaround (issue #1025) itself and restores `project.clj` afterward; running `lein cljsbuild once app` directly does not need it.
 - Run without a full rebuild (assumes `script/build.sh` has run at least once): `script/light.sh`
 - Build API docs locally (creates `codox/`, not for commit): `lein with-profile doc codox`
-- Rebuild `cljsDeps.js` (needed after a ClojureScript version upgrade): `lein cljsbuild once cljsdeps`
+- Rebuild `cljsDeps.js` (needed after a ClojureScript version upgrade, or after editing anything under `src-cljsdeps/`): `lein cljsbuild once cljsdeps` — `script/build.sh` already does this on every run, after `npm install` (which can otherwise wipe `deploy/core/node_modules/clojurescript/`).
 
-There are no automated tests in this repo; QA is manual (see the release checklist in `doc/for-committers.md`).
+There are no automated tests in this repo; QA is manual (see the release checklist in `doc/for-committers.md`). The app currently targets Electron 44.4.3 (see `ELECTRON-UPDATE-PLAN.md` for the migration history from the previous Electron 13.1.2 pin, including known non-blocking issues).
 
 ## Architecture
 
@@ -41,16 +41,12 @@ When exploring the codebase, prefer the in-app searcher / doc searcher over gues
 - `src/lt/objs/` — the built-in objects: editor, files, command, console, notifos, search, sidebar, clients, langs, etc. This is the bulk of LT's own logic.
 - `src/lt/plugins/` — built-in plugins (auto-complete, auto-paren, doc, watches).
 - `src/lt/util/` — shared utilities.
-- `src-cljsdeps/` — compiled separately into `deploy/core/node_modules/clojurescript/cljsDeps.js`, used by the background-thread worker (`threadworker.js`) to run ClojureScript compilation in a Web Worker (invoked via the `background` macro).
-- `deploy/` — the Electron shell and the full runtime tree shipped in a build, including `deploy/core/node_modules/` (vendored, forked, and LT-specific JS/Node libraries — see below) and `deploy/electron/`.
+- `src-cljsdeps/` — compiled separately into `deploy/core/node_modules/clojurescript/cljsDeps.js`, read by `deploy/core/lighttable/background/threadworker.js`. That file is **not** a Web Worker — it's a `child_process.fork`'d Node process (re-launched via `ELECTRON_RUN_AS_NODE`), used by the `background` macro to run work (search, fuzzy file navigation, behaviors parsing) off the renderer's main thread.
+- `deploy/` — the Electron shell and the full runtime tree shipped in a build: `deploy/core/` (the app payload, becomes `resources/app/core/`), `deploy/electron/` (pins and downloads the Electron binary — see `deploy/electron/package.json`), `deploy/platform/{mac,linux,win}/` (per-OS branding/launcher scripts), `deploy/settings/default/` (default keymap/behaviors).
 
 ### Node dependencies under `deploy/core/node_modules/`
 
-Per `doc/for-committers.md`, this directory mixes several kinds of packages, distinguished in `deploy/core/package.json`:
-
-- `dependencies` — vendored upstream packages; do not modify directly, update via `npm install NAME@VERSION` inside `deploy/core`.
-- `forkedDependencies` — packages with LT-specific patches that should eventually go upstream (e.g. the Mousetrap fork adds chord/sequence support; changes are wrapped in comments marking the deviation).
-- LT-specific libraries (e.g. `clojurescript`, `codemirror_addons`, `lighttable`).
+This entire directory is `npm install`-populated at build time and gitignored — nothing under it is committed, and `forkedDependencies` in `deploy/core/package.json` is now empty (as of commit `000cc9b`, "npm install happens at build, no more forking of libraries"). LT-specific JS lives instead in the **committed** `deploy/core/lighttable/` directory — notably `deploy/core/lighttable/codemirror/` (forks of CodeMirror's search/hint addons with LT-specific APIs, *not* drop-in replacements for the upstream addons — see its README before touching them) and `deploy/core/lighttable/background/` (the worker scripts above).
 
 ### Editing/evaling ClojureScript live
 

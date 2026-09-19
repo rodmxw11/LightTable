@@ -52,6 +52,13 @@
           :reaction (fn [this msg]
                       (send-to (:socket @this) (array (:cb msg) (:command msg) (-> msg :data clj->js)))))
 
+;; KNOWN BROKEN, pre-existing and orthogonal to the Electron version:
+;; deploy/core/package.json pins socket.io ^4.0.1, but this code uses the
+;; socket.io ~0.9 API (.listen returning an object with .set/.sockets/
+;; .server, rather than v4's Server class). `io.listen` is not a function
+;; on v4's export, so this throws and `server` is nil below. Needs either
+;; downgrading the dependency or rewriting against the v4 API — not
+;; attempted here since it is unrelated to the Electron 13->44 upgrade.
 (def server
   (try
     (let [ ws (.listen io 5678)]

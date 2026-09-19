@@ -248,6 +248,14 @@ Verified end-to-end via CDP against a live instance: the local devtools client (
 - Update `CLAUDE.md`: it currently describes `deploy/core/node_modules/` as vendored/forked (no longer true after `000cc9b`) and `threadworker.js` as a Web Worker (it is a `child_process.fork`).
 - Backlog notes (docstring in `lt/util/remote.cljs` + issues): contextIsolation hardening, deliberately deferred; `ws.cljs:57` uses socket.io v0.9 API against socket.io 4 (already broken, orthogonal); `request@2.88.2` is deprecated and is most of the 140-package tree.
 
+**Result: done.**
+- `doc/developer-install.md` — already updated in Phase 4 (chrome-sandbox docs, libgconf line removed).
+- `doc/for-committers.md` — restated the version-sync rule explicitly (two separate files, nothing enforces they match), and added the `request@2.88.2` backlog note.
+- `script/build.sh` — added a real build-time check (not just documentation): compares `deploy/electron/package.json`'s pinned Electron version against `deploy/core/version.json`'s, warns on divergence before the build proceeds.
+- `CLAUDE.md` — corrected the Web-Worker mischaracterization of `threadworker.js` (it's a `child_process.fork`), corrected the stale vendored/forked `node_modules` description (empty since `000cc9b`; LT's own JS lives in the committed `deploy/core/lighttable/`), added JDK/`LT_JAVA_HOME` and Git-Bash-works-now notes, and pointed at this plan document for upgrade history.
+- `src/lt/objs/clients/ws.cljs` — added an in-place comment on the `(def server ...)` block explaining the pre-existing socket.io v0.9-vs-v4 API mismatch, so a future reader hits an explanation instead of a mystery `TypeError`.
+- `lt/util/remote.cljs`'s contextIsolation backlog note was already written when the namespace was created in Phase 5.
+
 ---
 
 ## Verification

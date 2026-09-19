@@ -27,6 +27,17 @@ fi
 # Ensure we start in project root
 cd "$(dirname "${BASH_SOURCE[0]}")"; cd ..
 
+# deploy/electron/package.json pins the Electron version actually downloaded
+# and packaged; deploy/core/version.json's "electron" key is what
+# lt.objs.deploy compares against process.versions.electron at runtime to
+# decide whether to nag the user about a stale binary. Nothing else keeps
+# these two files in sync.
+PINNED_ELECTRON=$(node -pe "require('./deploy/electron/package.json').devDependencies.electron")
+VERSION_JSON_ELECTRON=$(node -pe "require('./deploy/core/version.json').electron")
+if [ "$PINNED_ELECTRON" != "$VERSION_JSON_ELECTRON" ]; then
+  echo >&2 "WARNING: deploy/electron/package.json pins Electron $PINNED_ELECTRON but deploy/core/version.json says $VERSION_JSON_ELECTRON. Update both, or every launch will show a spurious binary-update nag."
+fi
+
 # Ensure we have current version of electron
 pushd deploy/electron
   npm install
