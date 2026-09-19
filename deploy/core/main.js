@@ -7,6 +7,8 @@ const {
     ipcMain
 } = require('electron');
 
+const remoteMain = require('@electron/remote/main');
+remoteMain.initialize();
 
 let yargs = require('yargs');
 
@@ -19,9 +21,12 @@ var packageJSON = require(__dirname + '/package.json');
 
 // Returns Window object
 function createWindow() {
-    let browserWindowOptions = packageJSON.browserWindowOptions;
-    browserWindowOptions.icon = __dirname + '/' + browserWindowOptions.icon;
+    // Clone so repeated calls (multiple windows) don't re-prefix an
+    // already-absolute icon path on packageJSON's cached, shared object.
+    let browserWindowOptions = Object.assign({}, packageJSON.browserWindowOptions);
+    browserWindowOptions.icon = __dirname + '/' + packageJSON.browserWindowOptions.icon;
     let window = new BrowserWindow(browserWindowOptions);
+    remoteMain.enable(window.webContents);
     windows[window.id] = window;
     window.focus();
     window.webContents.on("will-navigate", function(e) {
@@ -64,7 +69,7 @@ function createWindow() {
 
     // Emitted when the window is closed.
     window.on('closed', function() {
-        windows[window.id] = null;
+        delete windows[window.id];
     });
 
     return window;
@@ -84,7 +89,7 @@ function onReady() {
 
     ipcMain.on("toggleDevTools", function(event, windowId) {
         if (windowId && windows[windowId]) {
-            windows[windowId].toggleDevTools();
+            windows[windowId].webContents.toggleDevTools();
         }
     });
 
@@ -110,7 +115,9 @@ function parseArgs() {
 
 function start() {
     app.commandLine.appendSwitch('remote-debugging-port', '8315');
-    app.commandLine.appendSwitch('js-flags', '--harmony');
+    // Chromium 111+ rejects CDP WebSocket upgrades whose Origin isn't
+    // allow-listed; LT's own devtools client connects to this origin.
+    app.commandLine.appendSwitch('remote-allow-origins', 'http://localhost:8315');
 
     // This method will be called when electron has done everything
     // initialization and ready for creating browser windows.

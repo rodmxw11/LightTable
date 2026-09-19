@@ -10,15 +10,16 @@
     "minWidth": 400,
     "minHeight": 400,
     "webPreferences": {
-      "webgl": true,
-      "webaudio": true,
-      "plugins": true,
       "nodeIntegration": true,
       "contextIsolation": false,
-      "enableRemoteModule": true
+      "sandbox": false,
+      "webviewTag": true,
+      "spellcheck": false,
+      "backgroundThrottling": false
     }
   },
   "dependencies": {
+    "@electron/remote": "2.1.3",
     "bencode": "^2.0.1",
     "codemirror": "^5.61.0",
     "jsonify": "*",

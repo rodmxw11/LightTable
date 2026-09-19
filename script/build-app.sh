@@ -102,6 +102,11 @@ elif [ "$OS" == "linux" ]; then
 
   mv $RELEASE_DIR/electron $RELEASE_DIR/LightTable
 
+  # Only takes effect when building as root; otherwise light (the launcher
+  # script) detects this at runtime and falls back to --no-sandbox.
+  chown root:root $RELEASE_DIR/chrome-sandbox 2>/dev/null || true
+  chmod 4755 $RELEASE_DIR/chrome-sandbox 2>/dev/null || true
+
 elif [ "$OS" == "windows" ]; then
 
   mv $RELEASE_DIR/electron.exe $RELEASE_DIR/LightTable.exe

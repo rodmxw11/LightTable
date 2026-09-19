@@ -6,12 +6,12 @@
             [lt.objs.platform :as platform]
             [lt.objs.app :as app]
             [lt.util.dom :as dom]
-            [clojure.string :as string])
+            [clojure.string :as string]
+            [lt.util.remote :as remote])
   (:require-macros [lt.macros :refer [behavior]]))
 
-(def remote (.-remote (js/require "electron")))
-(def Menu (.-Menu remote))
-(def MenuItem (.-MenuItem remote))
+(def Menu remote/Menu)
+(def MenuItem remote/MenuItem)
 
 (declare submenu)
 
@@ -43,7 +43,7 @@
     menu-instance))
 
 (defn show-menu [m]
-  (.popup m (.getCurrentWindow remote)))
+  (.popup m #js {:window (remote/current-window)}))
 
 (dom/on (dom/$ :body) :contextmenu (fn [e]
                                      (dom/prevent e)

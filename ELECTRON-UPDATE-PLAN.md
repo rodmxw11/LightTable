@@ -107,11 +107,15 @@ In a scratch directory, `npm i electron@44.4.3 @electron/remote@2.1.3` and write
 - Fails → retry on 42.11.6.
 - Fails everywhere → the compat-mode strategy needs rethinking before any CLJS work.
 
+**Result: PASS.** All five checks succeeded on Electron 44.4.3 with `@electron/remote@2.1.3`: module loads, `getCurrentWindow().getSize()` returns correctly, `dialog.showOpenDialogSync` exists, `Menu`/`MenuItem` construct and a click callback round-trips main→renderer→main (confirmed asynchronously — the synchronous return value inside the click handler reads stale, but the main process's own delayed check confirmed the flag was set), and `Menu.setApplicationMenu` succeeds. No fallback to 42.11.6 needed.
+
 ---
 
 ## Phase 4 — Main process + packaging
 
 App is not expected to fully work at the end of this phase; Phase 5 fixes the renderer.
+
+**Result: done.** Applied everything below plus one addition found during a full `script/build.sh` run: the `electron` npm package's postinstall binary download was observed to silently no-op (no error, no binary) in both the Phase 3 scratch test and the real build — `script/build.sh` now checks for the dist binary after `npm install` and forces `node node_modules/electron/install.js` if it's missing.
 
 **`deploy/electron/package.json:5`** → `"electron": "44.4.3"`. Delete and regenerate `deploy/electron/package-lock.json`.
 
@@ -171,6 +175,8 @@ Must be a **leaf namespace** — it can require nothing from `lt.objs.*`, since 
 | `dialogs.cljs:8-9,12,17,22` | `(def dialog remote/dialog)`, then **`showOpenDialog`→`showOpenDialogSync`, `showSaveDialog`→`showSaveDialogSync`**. These preserve the synchronous return shape the existing code relies on — a 3-identifier change, not a promise refactor. They return `undefined` on cancel, so the `doseq` at `:13,18` is already safe. |
 | `platform.cljs:10,15` | `(.getAppPath remote/app)`. |
 | `cli.cljs:14,31,34,36` | `(remote/get-global "browserParsedArgs")`, `(remote/get-global "browserOpenFiles")`, `(.-argv remote/remote-process)`. |
+
+**Result: done and verified live.** Full `script/build.sh` run on Electron 44.4.3, launched, driven via CDP against the actual running app: `app/win.getSize()` → `[1024,700]`, `isFullScreen()` → `false`, `window-number` → `1`, `platform/get-data-path` → correct app path, `menu.cljs` Menu/MenuItem construction succeeded, both `dialog.showOpenDialogSync`/`showSaveDialogSync` exist, `cli/argv` correctly proxied from the main process. No uncaught exceptions beyond the already-known, pre-existing `ws.cljs` socket.io mismatch (Risk #10). Find/replace re-verified working identically to the Electron 13 baseline.
 
 ---
 

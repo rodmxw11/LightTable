@@ -30,6 +30,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")"; cd ..
 # Ensure we have current version of electron
 pushd deploy/electron
   npm install
+  # electron's postinstall binary download has been observed to silently
+  # no-op in some environments without npm reporting an error; force it
+  # if the dist binary didn't materialize.
+  if [ ! -f node_modules/electron/dist/electron.exe ] && [ ! -f node_modules/electron/dist/electron ] && [ ! -f node_modules/electron/dist/Electron.app/Contents/MacOS/Electron ]; then
+    echo "Electron binary missing after npm install, forcing install.js..."
+    node node_modules/electron/install.js
+  fi
 popd
 
 # Ensure we have current version of core

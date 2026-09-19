@@ -2,18 +2,18 @@
   "Provide platform-agnostic and platform related fns"
   (:require [lt.object :as object]
             [lt.util.dom :as dom]
-            [lt.util.process :as process])
+            [lt.util.process :as process]
+            [lt.util.remote :as remote])
   (:require-macros [lt.macros :refer [behavior]]))
 
 (def electron true)
 
 (def fs (js/require "fs"))
-(def remote (.-remote (js/require "electron")))
 (def clipboard (.-clipboard (js/require "electron")))
 (def electron-shell (.-shell (js/require "electron")))
 
 (defn get-data-path []
-  (.getAppPath (.-app remote)))
+  (.getAppPath remote/app))
 
 (defn normalize [plat]
   (condp = plat

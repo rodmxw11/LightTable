@@ -52,10 +52,22 @@ In order to rebrand a build's resulting executable with the Light Table icon, yo
 
 ### Linux
 
-To run electron on Linux you need to have libgconf-2.so.4 installed.
+Modern Electron (44+, as of the Electron 44 upgrade) no longer depends on
+`libgconf-2.so.4` — that requirement applied only to the old Electron 13
+build and has been dropped.
 
+Electron's Chromium sandbox needs its `chrome-sandbox` helper binary to be
+owned by root and setuid:
 
-Ref: [Linux (Arch) build depends on libgconf-2.so.4](https://github.com/LightTable/LightTable/issues/1926)
+```
+sudo chown root:root chrome-sandbox
+sudo chmod 4755 chrome-sandbox
+```
+
+`script/build-app.sh` attempts this automatically, but it only takes effect
+when building as root. If you don't do this (or extracted from a release
+tarball/zip, which never preserves the setuid bit), the bundled `light`
+launcher script detects it and falls back to running with `--no-sandbox`.
 
 Note that, on Debian-based distros, you may need to install an additional package as there is a pre-existing *node* package and the standard Node.js package on these distros installs a Node.js executable named `nodejs` instead of `node` as our build script expects. See issue [#1931](https://github.com/LightTable/LightTable/issues/1931) for some background.
 

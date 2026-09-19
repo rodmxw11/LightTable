@@ -8,11 +8,11 @@
             [clojure.string :as string]
             [lt.util.js :refer [now]]
             [lt.util.dom :refer [$] :as dom]
-            [lt.util.ipc :as ipc])
+            [lt.util.ipc :as ipc]
+            [lt.util.remote :as remote])
   (:require-macros [lt.macros :refer [behavior]]))
 
-(def remote (.-remote (js/require "electron")))
-(def win (.getCurrentWindow remote))
+(def win (remote/current-window))
 (def frame (.-webFrame (js/require "electron")))
 (def closing true)
 (def default-zoom 1)

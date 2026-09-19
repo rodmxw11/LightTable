@@ -2,36 +2,19 @@
 
 BIN=LightTable
 HERE=`dirname $(readlink -f $0)`
+SANDBOX="${HERE}/chrome-sandbox"
 
-LIBUDEV_0=libudev.so.0
-LIBUDEV_1=libudev.so.1
-
-add_udev_symlinks() {
-  # look for libudev.so.0, and if that can't be found link it to libudev.so.1
-  # detect 64-bit or default to 32-bit
-  if [ $(getconf LONG_BIT) == "64" ]; then
-    FOLDERS="/lib64 /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib"
-  else
-    FOLDERS="/lib /lib/i386-linux-gnu /usr/lib /usr/lib/i386-linux-gnu"
-  fi
-
-  for folder in $FOLDERS; do
-    if [ -f "${folder}/${LIBUDEV_0}" ]; then
-      return 0
-    fi
-  done
-
-  for folder in $FOLDERS; do
-    if [ -f "${folder}/${LIBUDEV_1}" ]; then
-      ln -snf "${folder}/${LIBUDEV_1}" "${HERE}/${LIBUDEV_0}"
-      return 0
-    fi
-  done
-
-  echo "${LIBUDEV_0} or ${LIBUDEV_1} not found in any of ${FOLDERS}".
-  exit 1
+# Electron's chrome-sandbox helper needs to be owned by root and setuid
+# (chown root:root chrome-sandbox && chmod 4755 chrome-sandbox) to use
+# Chromium's SUID sandbox. Packaging (tar/zip) never preserves that, and
+# most installs won't have run the chown/chmod step, so fall back to
+# --no-sandbox rather than fail to launch. See doc/developer-install.md.
+is_setuid_root() {
+  [ -u "$SANDBOX" ] && [ "$(stat -c '%U' "$SANDBOX" 2>/dev/null)" == "root" ]
 }
 
-add_udev_symlinks
-
-LD_LIBRARY_PATH="$HERE:$LD_LIBRARY_PATH" $HERE/$BIN "$@" &
+if [ -f "$SANDBOX" ] && ! is_setuid_root; then
+  exec "$HERE/$BIN" --no-sandbox "$@"
+else
+  exec "$HERE/$BIN" "$@"
+fi

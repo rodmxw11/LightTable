@@ -9,10 +9,9 @@
             [clojure.string :as string]
             [lt.util.ipc :as ipc]
             [lt.objs.opener :as opener]
-            [lt.util.process :as process])
+            [lt.util.process :as process]
+            [lt.util.remote :as remote])
   (:require-macros [lt.macros :refer [behavior]]))
-
-(def remote (.-remote (js/require "electron")))
 
 (defn open-paths [path-line-pairs add?]
   (doseq [[path line] path-line-pairs
@@ -29,12 +28,12 @@
       (object/raise opener/opener :new! path))))
 
 (def parsed-args "Map of commandline options parsed by yargs"
-  (js->clj (.getGlobal remote "browserParsedArgs") :keywordize-keys true))
+  (js->clj (remote/get-global "browserParsedArgs") :keywordize-keys true))
 
 (def open-files "Files to open from a file manager"
-  (js->clj (.getGlobal remote "browserOpenFiles")))
+  (js->clj (remote/get-global "browserOpenFiles")))
 
-(def argv "Arguments used to start LightTable" (js->clj (.-argv (.-process remote))))
+(def argv "Arguments used to start LightTable" (js->clj (.-argv remote/remote-process)))
 
 (ipc/on "openFileAfterStartup" #(object/raise app/app :open! %))
 
