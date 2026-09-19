@@ -4,7 +4,8 @@
             [lt.objs.files :as files]
             [lt.objs.platform :as platform]
             [lt.objs.console :as console]
-            [cljs.reader :as reader])
+            [cljs.reader :as reader]
+            [lt.util.process :as process])
   (:require-macros [lt.macros :refer [behavior background]]))
 
 (def cp (js/require "child_process"))
@@ -67,7 +68,7 @@
                 :init (fn [this]
                         (let [worker (.fork cp (files/lt-home "/core/lighttable/background/threadworker.js")
                                             (clj->js ["--harmony"])
-                                            (clj->js {:execPath js/process.execPath
+                                            (clj->js {:execPath process/exec-path
                                                       :silent true
                                                       :env {"ATOM_SHELL_INTERNAL_RUN_AS_NODE" 1}
                                                       :cwd files/cwd}))]

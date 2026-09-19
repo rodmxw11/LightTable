@@ -4,6 +4,14 @@
     <title>
       Light Table
     </title>
+    <script type="text/javascript">
+        // Stash Electron's real, nodeIntegration-provided process object
+        // before the ClojureScript compiler's own bootstrap (part of
+        // cljs.core's environment-target detection, see process.env.cljs
+        // in the ClojureScript standard library) unconditionally
+        // reassigns the global `process` to a bare {env:{}} shim.
+        window.__electronProcess = window.process;
+    </script>
     <link type="text/css" rel="stylesheet" href="css/reset.css"></link>
     <link type="text/css" rel="stylesheet" href="node_modules/codemirror/lib/codemirror.css"></link>
     <link type="text/css" rel="stylesheet" href="css/structure.css"></link>

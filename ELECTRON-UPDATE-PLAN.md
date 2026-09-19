@@ -77,6 +77,24 @@ npm install (deploy/electron) → npm install (deploy/core)
 
 ---
 
+## Phase 2c — Discovered during Phase 2 verification: app was already broken on Electron 13
+
+CDP-driven verification of Phase 2a/2b (see "Working in sessions" below) surfaced two independent, pre-existing defects that had nothing to do with codemirror/cljsdeps, but blocked verifying them. Both are fixed and confirmed via a real running instance:
+
+1. **`deploy/core/package.json`'s `webPreferences` never set `nodeIntegration`/`contextIsolation`/`enableRemoteModule`.** On Electron 13's actual defaults (`nodeIntegration:false`, `contextIsolation:true`, `enableRemoteModule:false`), the renderer's `js/global` usage in `src/lt/util/cljs.cljs:24,36,44` threw `ReferenceError: global is not defined` at namespace-load time, before almost anything else in the bundle ran. Fixed by adding all three to `deploy/core/package.json`'s `webPreferences` (the `enableRemoteModule` flag is Electron-<14-only; it goes away in Phase 4/5 when `remote` is replaced by `@electron/remote`).
+2. **ClojureScript's own compiled bootstrap clobbers Electron's real `process` object.** `process.env.cljs` in the ClojureScript 1.10.844 standard library (part of `cljs.core`'s environment-target detection, pulled in unconditionally, not tied to any app-level require) compiles to `var process = {env:{}};` near the top of `bootstrap.js`. Since it's a top-level `var`, it overwrites `window.process` — including the fully-populated object Electron had just injected — for the rest of the script's lifetime. Fixed by:
+   - `LightTable.html` stashing the real object as `window.__electronProcess` in an inline script, before `bootstrap.js` loads.
+   - A new leaf namespace `src/lt/util/process.cljs` exposing `process`, `env`, `platform`, `argv`, `exec-path`, `versions`, `version`, `cwd`, `next-tick`.
+   - Updating every other namespace that read `js/process` directly to go through it instead: `platform.cljs`, `ipc.cljs`, `cli.cljs`, `deploy.cljs`, `console.cljs`, `files.cljs`, `proc.cljs`, `settings.cljs`, `thread.cljs`.
+
+This is unrelated to Electron version and would affect any build with this ClojureScript toolchain — it just happened to be masked until fix #1 above let execution get far enough to hit it.
+
+**Also found, not fixed (confirmed harmless):** the restored `search.js` fork's `CodeMirror.commands.replaceAll` wrapper has a parameter-shadowing bug (`function(cm, query, replace) { replace(cm, query, replace, true); }` — the `replace` parameter shadows the outer `replace` function). Verified this is dead code: `find.cljs:124` always calls `CodeMirror.commands.replace(cm, text, rev, all?)` directly, never `replaceAll`. Left as-is since fixing it would deviate from the verbatim-restored historic file for no functional benefit; noted here in case it's ever called directly.
+
+**Verification performed:** live CDP (Chrome DevTools Protocol) session against a running packaged build, connecting to the app's own `--remote-debugging-port 8315` (already exposed by `main.js`). Confirmed via `Runtime.evaluate`: no uncaught exceptions on load, UI renders (`#wrapper` opacity 1, full DOM built), `lt.objs.command` and other namespaces load. Functionally exercised the actual `find.cljs` code path — `CodeMirror.commands.find` then `CodeMirror.commands.replace(cm, text, rev, true)` correctly replaced all 3 occurrences of a test string; `all?=false` correctly replaced only the first. Autocomplete's restored functions (`positionHint`, `ensureHintVisible`) confirmed present with correct signatures and execute without error when `:hint` is raised on a real editor object; full UI-trigger verification (the hint corpus builds incrementally from real keystrokes via a debounced `:change` behavior, not from bulk content changes) needs manual testing.
+
+---
+
 ## Phase 3 — Electron smoke test in isolation (throwaway, no commit)
 
 **Target: pin `electron` to `44.4.3` exactly** (Electron supports the latest three majors — 42/43/44). Anything ≥40 fixes the Linux problem.

@@ -15,7 +15,8 @@
             [lt.util.js :refer [every]]
             [lt.util.cljs :refer [str-contains?]]
             [clojure.string :as string]
-            [fetch.core :as fetch])
+            [fetch.core :as fetch]
+            [lt.util.process :as process])
   (:require-macros [fetch.macros :refer [letrem]]
                    [lt.macros :refer [behavior defui]]))
 
@@ -77,7 +78,7 @@
                         "headers" (js-obj "User-Agent" "Light Table")
                         "strictSSL" request-strict-ssl)
         out (.createWriteStream fs to)]
-    (when-let [proxy (or js/process.env.http_proxy js/process.env.https_proxy)]
+    (when-let [proxy (or (.-http_proxy process/env) (.-https_proxy process/env))]
       (set! (.-proxy options) proxy))
 
     (-> (.get request options cb)
@@ -163,7 +164,7 @@
   "Binary/electron version. The two versions are in sync since binaries updates
   only occur with electron updates."
   []
-  (aget js/process.versions "electron"))
+  (aget process/versions "electron"))
 
 (defui button [label & [cb]]
        [:div.button.right label]

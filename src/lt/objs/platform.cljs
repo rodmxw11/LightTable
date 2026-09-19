@@ -1,7 +1,8 @@
 (ns lt.objs.platform
   "Provide platform-agnostic and platform related fns"
   (:require [lt.object :as object]
-            [lt.util.dom :as dom])
+            [lt.util.dom :as dom]
+            [lt.util.process :as process])
   (:require-macros [lt.macros :refer [behavior]]))
 
 (def electron true)
@@ -44,7 +45,7 @@
   []
   (.readText clipboard))
 
-(def platform (normalize (.-platform js/process)))
+(def platform (normalize process/platform))
 
 (defn mac? []
   (= platform :mac))

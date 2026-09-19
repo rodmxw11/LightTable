@@ -6,7 +6,8 @@
             [lt.util.load :as load]
             [clojure.string :as string]
             [lt.objs.platform :as platform]
-            [lt.util.js :refer [now]])
+            [lt.util.js :refer [now]]
+            [lt.util.process :as process])
   (:require-macros [lt.macros :refer [behavior]]))
 
 (def ^:private fs (js/require "fs"))
@@ -68,7 +69,7 @@
 (def line-ending "Current platform-specific line ending." (.-EOL os))
 (def separator "Current platform-specific file separator." (.-sep fpath))
 (def ^:private available-drives #{})
-(def cwd "Directory process is started in." (js/process.cwd))
+(def cwd "Directory process is started in." (process/cwd))
 
 (when (= separator "\\")
   (.exec (js/require "child_process") "wmic logicaldisk get name"
@@ -496,9 +497,9 @@
   "Return users' home directory (e.g. ~/) or path under it."
   ([] (home nil))
   ([path]
-   (let [h (if (= js/process.platform "win32")
-             js/process.env.USERPROFILE
-             js/process.env.HOME)]
+   (let [h (if (= process/platform "win32")
+             (.-USERPROFILE process/env)
+             (.-HOME process/env))]
      (join h (or path separator)))))
 
 (defn lt-home
@@ -512,8 +513,8 @@
   settings, plugins, logs, and caches)."
   ([] (lt-user-dir ""))
   ([path]
-   (if js/process.env.LT_USER_DIR
-     (join js/process.env.LT_USER_DIR path)
+   (if (.-LT_USER_DIR process/env)
+     (join (.-LT_USER_DIR process/env) path)
      (join data-path path))))
 
 (defn walk-up-find

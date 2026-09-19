@@ -1,5 +1,6 @@
 (ns lt.util.ipc
-  "Util functions for the ipc renderer - https://github.com/atom/electron/blob/master/docs/api/ipc-renderer.md")
+  "Util functions for the ipc renderer - https://github.com/atom/electron/blob/master/docs/api/ipc-renderer.md"
+  (:require [lt.util.process :as process]))
 
 (def ipc "Provides access to the ipc renderer." (.-ipcRenderer (js/require "electron")))
 
@@ -10,7 +11,7 @@
 (declare start)
 
 ;; Set $IPC_DEBUG to debug incoming and outgoing ipc messages for the renderer process
-(when (aget js/process.env "IPC_DEBUG")
+(when (aget process/env "IPC_DEBUG")
   (let [old-send transport
         old-on start]
     (def transport (fn [& args]

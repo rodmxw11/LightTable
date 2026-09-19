@@ -10,7 +10,8 @@
             [lt.objs.tabs :as tabs]
             [clojure.string :as string]
             [lt.util.dom :refer [$ append empty parents] :as dom]
-            [lt.objs.platform :as platform])
+            [lt.objs.platform :as platform]
+            [lt.util.process :as process])
   (:require-macros [singultus.def-macros :refer [defpartial]]
                    [lt.macros :refer [behavior defui]]))
 
@@ -78,7 +79,7 @@
                :else (str e)))
          "error")))
 
-(.on js/process "uncaughtException" #(error %))
+(.on process/process "uncaughtException" #(error %))
 
 (defui console-ui [this]
   [:ul.console]

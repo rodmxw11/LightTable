@@ -12,7 +12,10 @@
     "webPreferences": {
       "webgl": true,
       "webaudio": true,
-      "plugins": true
+      "plugins": true,
+      "nodeIntegration": true,
+      "contextIsolation": false,
+      "enableRemoteModule": true
     }
   },
   "dependencies": {

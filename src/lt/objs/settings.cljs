@@ -15,7 +15,8 @@
             [lt.objs.sidebar.command :as scmd]
             [lt.util.dom :as dom]
             [lt.util.cljs :refer [str-contains?]]
-            [cljs.reader :as reader])
+            [cljs.reader :as reader]
+            [lt.util.process :as process])
   (:require-macros [lt.macros :refer [behavior defui]]))
 
 (defn safe-read [s file]
@@ -162,8 +163,8 @@
         (object/refresh! (first objs))
         (catch :default e
           (console/error e)))
-      (js/process.nextTick (fn []
-                             (refresh-all (next objs)))))))
+      (process/next-tick (fn []
+                            (refresh-all (next objs)))))))
 
 (defn refresh-diffed [diff]
   (->> (concat (keys (:+ diff))

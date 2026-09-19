@@ -7,7 +7,8 @@
             [lt.objs.app :as app]
             [lt.objs.notifos :as notifos]
             [lt.util.load :as load]
-            [clojure.string :as string])
+            [clojure.string :as string]
+            [lt.util.process :as process])
   (:require-macros [lt.macros :refer [behavior]]))
 
 (def shell (load/node-module "shelljs"))
@@ -38,9 +39,9 @@
 
 (defn merge-env [env]
   (if-not env
-    js/process.env
-    (clj->js (merge (into {} (for [k (js/Object.keys js/process.env)]
-                               [k (aget js/process.env k)]))
+    process/env
+    (clj->js (merge (into {} (for [k (js/Object.keys process/env)]
+                               [k (aget process/env k)]))
                     env
                     @custom-env))))
 
@@ -131,7 +132,7 @@
           :triggers #{:init}
           :reaction (fn [app]
                       (when (and (platform/mac?)
-                                 (not (aget js/process.env "LTCLI")))
+                                 (not (aget process/env "LTCLI")))
                         (.exec (js/require "child_process") (str (etc-paths->PATH) (get-path-command))
                                (fn [err out serr]
                                  (if-not (empty? err)
@@ -139,7 +140,7 @@
                                      (notifos/set-msg! "Failed to source PATH files. See console log for details." {:class "error"})
                                      (.error js/console err))
                                    (when-not (empty? out)
-                                     (set! js/process.env.PATH out))))))))
+                                     (set! (.-PATH process/env) out))))))))
 
 (behavior ::global-path
           :triggers #{:object.instant}
@@ -148,7 +149,7 @@
           :params [{:label "path"}]
           :exclusive true
           :reaction (fn [app path]
-                      (set! js/process.env.PATH path)))
+                      (set! (.-PATH process/env) path)))
 
 (behavior ::global-env
           :triggers #{:object.instant}

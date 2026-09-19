@@ -37,6 +37,12 @@ pushd deploy/core
   npm install
 popd
 
+# Build cljsDeps.js, consumed by the background worker thread
+# (deploy/core/lighttable/background/threadworker.js). Must run after
+# npm install, since npm install can wipe deploy/core/node_modules/.
+rm -rf deploy/core/node_modules/clojurescript
+lein cljsbuild once cljsdeps
+
 # Build the core cljs
 
 # Workaround for #1025 windows bug. project.clj is checked in, so restore
@@ -49,11 +55,6 @@ case "$(uname -s)" in
 esac
 rm -f deploy/core/lighttable/bootstrap.js
 lein cljsbuild once app
-
-#if [ -d "deploy/core/node_modules/clojurescript" ]; then
-#    rm -i -rf deploy/core/node_modules/clojurescript
-#fi
-#lein cljsbuild once cljsdeps
 
 # Fetch plugins
 PLUGINS=("Clojure,0.3.3" "CSS,0.0.6" "HTML,0.1.0" "Javascript,0.2.0"
