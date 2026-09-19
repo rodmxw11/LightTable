@@ -1,6 +1,6 @@
 (function(window) {
 
-  const { ipcMain, ipcRenderer } = require('electron');
+  const { ipcRenderer } = require('electron');
 
   function toArray(arrayLike) {
     var final = [];
@@ -10,7 +10,7 @@
     return final;
   }
 
-  ipcMain.on("editor.eval.css", function(args) {
+  ipcRenderer.on("editor.eval.css", function(event, args) {
     var nodeName = args.name.replace(/\./, "-");
     var code = args.code;
     var styleElem = document.createElement("style");
@@ -32,7 +32,7 @@
   });
 
 
-  ipcMain.on("editor.eval.cljs.exec", function(args) {
+  ipcRenderer.on("editor.eval.cljs.exec", function(event, args) {
       for(var i = 0; i < args.results.length; i++) {
         var data = args.results[i];
         var meta = args.results[i].meta;

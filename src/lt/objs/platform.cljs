@@ -22,14 +22,17 @@
     "darwin" :mac))
 
 (defn open-url [path]
-  (.openExternal electron-shell path))
+  (-> (.openExternal electron-shell path)
+      (.catch (fn [err] (js/lt.objs.console.error err)))))
 
 (defn open
   "If the given path exists, open it with the desktop's default manner.
   Otherwise, open it as an external protocol e.g. a url."
   [path]
   (if (.existsSync fs path)
-    (.openItem electron-shell path)
+    ;; shell.openPath resolves to an error string on failure, "" on success.
+    (-> (.openPath electron-shell path)
+        (.then (fn [err] (when (seq err) (js/lt.objs.console.error err)))))
     (open-url path)))
 
 (defn show-item [path]

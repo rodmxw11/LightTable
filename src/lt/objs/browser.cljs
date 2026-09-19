@@ -17,6 +17,7 @@
             [lt.objs.notifos :as notifos]
             [lt.objs.clients.devtools :as devtools]
             [lt.util.dom :as dom]
+            [lt.util.load :as load]
             [clojure.string :as string]
             [singultus.core :as crate]
             [singultus.binding :refer [bound subatom]])
@@ -91,10 +92,19 @@
 
 
 
+(defn preload-url
+  "Convert an absolute filesystem path into the file:// URL Electron's
+  webview preload attribute requires (a bare path is silently ignored)."
+  [path]
+  (let [path (string/replace path "\\" "/")
+        path (if (= load/separator "\\") (str "/" path) path)]
+    (str "file://" path)))
+
 (defui webview [this]
   [:webview {:src (bound (subatom this :url))
              :id (browser-id this)
-             :preload (files/lt-home "core/lighttable/browserInjection.js")}]
+             :preload (preload-url (files/lt-home "core/lighttable/browserInjection.js"))
+             :webpreferences "contextIsolation=no,sandbox=no,nodeIntegration=yes"}]
   :focus (fn []
            (object/raise this :active))
   :blur (fn []
@@ -238,7 +248,7 @@
                         (.addEventListener frame "contextmenu" (fn [e]
                                                                  (object/raise this :menu! e)))
                         (.addEventListener frame "did-finish-load" (fn []
-                                                                     (let [loc (.getUrl frame)]
+                                                                     (let [loc (.getURL frame)]
                                                                        (devtools/clear-scripts! (:devtools-client @this))
                                                                        (dom/val bar loc)
                                                                        (object/raise this :navigate loc))

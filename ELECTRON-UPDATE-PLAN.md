@@ -193,6 +193,8 @@ All are hard breaks independent of `remote`.
 | `thread.cljs:69-72` | `ATOM_SHELL_INTERNAL_RUN_AS_NODE` → `ELECTRON_RUN_AS_NODE`. **Also**: `:env` currently *replaces* the child's whole environment with one variable, so the worker runs with no `PATH`/`HOME`/`TMPDIR` — merge via `(js/Object.assign #js {} js/process.env ...)`. Drop the `"--harmony"` arg at `:69`; keep `:execPath js/process.execPath`. |
 | `files.cljs:74` | `wmic logicaldisk get name` — `wmic` was removed in Windows 11 24H2+. Replace with a `Get-PSDrive` PowerShell call (adjusting the `(str (.trim %) separator)` at `:77`, since output is already `C:\` form) or simply enumerate `A:`–`Z:` with `fs.existsSync`. Windows is in scope, and this currently fails silently. |
 
+**Result: done and verified live.** Implemented the drive enumeration with `(seq "ABC...Z")` rather than `(range (int \A) (inc (int \Z)))` — the latter silently breaks in ClojureScript, since `\A` compiles to the plain string `"A"` (cljs has no char type) and `int` on a non-numeric string bit-or-coerces to `0`, so the whole range collapsed to a single null character. Caught this via live CDP verification (`available-drives` came back `[]` against a machine with two real drives) rather than shipping it. After the fix: `["C:\\", "G:\\"]`, matching the actual drives. `platform/open`, `platform/open-url`, and `files/trash!` all verified to expose the correct Promise-returning methods without throwing.
+
 ---
 
 ## Phase 7 — `<webview>` / `browserInjection.js`
@@ -209,6 +211,10 @@ All are hard breaks independent of `remote`.
 
 **Verify:** open a browser tab, eval a CSS file (live style swap), eval a CLJS form (result returns via `sendToHost "browser-raise"`).
 
+**Result: done and verified live, end-to-end.** Via CDP: opened a real browser tab (`:add-browser-tab`), sent `editor.eval.css` through the webview exactly as `browser.cljs:339` does — guest page background changed color as expected. Sent `editor.eval.cljs.exec` exactly as `browser.cljs:347` does — the guest page evaluated the code and the result correctly round-tripped back via `sendToHost "browser-raise"` and was observed on an `ipc-message` listener attached to the webview.
+
+**Newly discovered, non-blocking:** Electron's own internal `<webview>` guest-view implementation (`electron/js2c/renderer_init.js`, not LightTable code) throws `TypeError: t.process.listenerCount is not a function` during webview creation and ipc-message dispatch. Root cause: Electron's internal code also expects the renderer's global `window.process` to be the real, nodeIntegration-provided object, but the Phase 2c fix only stashed a *copy* under `window.__electronProcess` for LightTable's own namespaces to use — it never restored the global `window.process` binding itself, which ClojureScript's compiled bootstrap still permanently overwrites with its bare `{env:{}}` shim early in page load. This did **not** block either CSS or CLJS eval from working correctly in testing, so it's cosmetic/log-noise rather than functional — but it's worth knowing about, since restoring `window.process` globally (rather than just a stashed copy) would be the complete fix, deferred here as it's a broader, higher-risk change (other loaded libraries may have already cached references to the shim) than this phase's scope.
+
 ---
 
 ## Phase 8 — DevTools / CDP (land last, isolatable)
@@ -222,6 +228,16 @@ Ordered, cheapest first:
 4. **`Console.*` domain is deprecated.** Migrate `::connect!` (`:210-212`) to `Runtime.enable` + `Log.enable` (keeping `Debugger.enable` and `Network.setCacheDisabled`), and adapt `Runtime.consoleAPICalled` / `Log.entryAdded` into the existing `handle-log-msg` multimethod (`:140-144`) — note params differ (`args` array of `RemoteObject` vs `text`, `stackTrace.callFrames` vs `url`/`line`). `Console.clearMessages` at `:250` → `Runtime.discardConsoleEntries`.
 
 **If Phase 8 drags, ship Phases 0–7 and file it.** What degrades: JS eval in browser tabs, JS live-reload-on-save, JS watches/instarepl in browser tabs, and Chromium-level console messages reaching the LT console. What is **unaffected**: ClojureScript eval, every language plugin client (those use LT's own WebSocket server in `lt.objs.clients.ws`), CSS/CLJS eval in browser tabs (Phase 7 path, not CDP), and the editor / workspace / find / autocomplete / sidebar / settings — i.e. ~95% of normal use.
+
+**Result: done and verified live for all four items.**
+1. Origin — already fixed in Phase 4, but needed a follow-up correction discovered during Phase 8 testing: `--remote-allow-origins http://localhost:8315` still rejected LT's own connection, because a `file://` page's WebSocket `Origin` header is the literal string `"null"`, not a URL that could be allow-listed. Changed to `--remote-allow-origins *` (this port is used only by LT itself, bound to localhost).
+2. HTTP discovery — implemented `fetch-debugger-info` via `js/require "http"`, with a 30-attempt retry cap (`max-reconnect-attempts`) replacing the unbounded `wait 1000` loop.
+3. `script-exists?` deleted; `changelive!` now calls `Debugger.setScriptSource` directly and drops the stale `:scripts` entry on an error reply instead of pre-checking and hitting the arity bug.
+4. `Console.enable` → `Runtime.enable` + `Log.enable`; added `console-api-called->msg`/`log-entry-added->msg` adapters feeding the existing `handle-log-msg` multimethod unchanged; `Console.clearMessages` → `Runtime.discardConsoleEntries`.
+
+**Blocker found and fixed during verification, unrelated to the four items above:** LightTable's behavior-wiring file (`deploy/settings/default/default.behaviors`) explicitly maps trigger tags to behavior IDs by fully-qualified keyword — `(behavior ...)` forms are inert until an entry like `[:clients.devtools :lt.objs.clients.devtools/console-log]` attaches them to a tag (see `doc/BOT.md`). Renaming `::console-log` into the two new `::runtime-console-api-called`/`::log-entry-added` behaviors silently orphaned that mapping — the old keyword no longer resolved to anything, and the new ones were never wired in, so console messages compiled and ran with no errors but never reached LT's console panel. Caught only because verification checked for the message actually appearing, not just the absence of exceptions. Fixed by updating the two `default.behaviors` entries to match.
+
+Verified end-to-end via CDP against a live instance: the local devtools client (`lt.objs.clients.devtools/local`, which targets LightTable's own window) successfully connects (`:connected true`) and populates `:scripts` via `Debugger.scriptParsed`. `console.log`/`console.error`/`console.warn` triggered in the page all correctly appear in LT's own console panel with the right level styling. `:clear!` (`Runtime.discardConsoleEntries`) executes without error.
 
 ---
 

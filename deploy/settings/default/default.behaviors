@@ -131,7 +131,8 @@
  [:clients :lt.objs.clients/raise-on-object]
 
  [:clients.devtools :lt.objs.clients.devtools/clear-queue-on-connect]
- [:clients.devtools :lt.objs.clients.devtools/console-log]
+ [:clients.devtools :lt.objs.clients.devtools/runtime-console-api-called]
+ [:clients.devtools :lt.objs.clients.devtools/log-entry-added]
  [:clients.devtools :lt.objs.clients.devtools/handle-message]
  [:clients.devtools :lt.objs.clients.devtools/clear-console]
  [:clients.devtools :lt.objs.clients.devtools/connect!]

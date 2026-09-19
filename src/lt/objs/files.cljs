@@ -71,13 +71,14 @@
 (def ^:private available-drives #{})
 (def cwd "Directory process is started in." (process/cwd))
 
+;; wmic (used previously to enumerate drives) was removed in Windows 11
+;; 24H2+; existsSync against each possible drive letter needs no subprocess.
 (when (= separator "\\")
-  (.exec (js/require "child_process") "wmic logicaldisk get name"
-         (fn [_ out _]
-           (let [ds (rest (.split out #"\r\n|\r|\n"))
-                 ds (map #(str (.trim %) separator) (remove empty? ds))]
-             (set! available-drives (into #{} ds)))
-           )))
+  (let [ds (for [l (seq "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+                 :let [drive (str l ":" separator)]
+                 :when (.existsSync fs drive)]
+             drive)]
+    (set! available-drives (into #{} ds))))
 
 (defn basename
   "Extracts the basename of the `path`, typically the end of the path.
@@ -401,9 +402,10 @@
       (when cb (cb e)))))
 
 (defn trash!
-  "Move file to trash and returns boolean status."
+  "Move file to trash. Returns a Promise that rejects on failure
+  (shell.trashItem, async since Electron 9)."
   [path]
-  (.moveItemTotrash electron-shell path))
+  (.trashItem electron-shell path))
 
 (defn delete!
   "Delete file or directory from filesystem."

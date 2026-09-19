@@ -116,8 +116,11 @@ function parseArgs() {
 function start() {
     app.commandLine.appendSwitch('remote-debugging-port', '8315');
     // Chromium 111+ rejects CDP WebSocket upgrades whose Origin isn't
-    // allow-listed; LT's own devtools client connects to this origin.
-    app.commandLine.appendSwitch('remote-allow-origins', 'http://localhost:8315');
+    // allow-listed. LT's own devtools client connects from a file://
+    // page, whose Origin header is the literal string "null" (not a URL
+    // it could be listed by), so allow all origins — this debugging
+    // port is used only by LT itself, bound to localhost.
+    app.commandLine.appendSwitch('remote-allow-origins', '*');
 
     // This method will be called when electron has done everything
     // initialization and ready for creating browser windows.

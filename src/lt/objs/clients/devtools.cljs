@@ -8,7 +8,6 @@
             [lt.objs.console :as console]
             [lt.objs.app :as app]
             [lt.objs.clients :as clients]
-            [fetch.core :as fetch]
             [singultus.core :as crate]
             [lt.util.dom :as dom]
             [lt.util.js :refer [every wait ->clj]]
@@ -22,6 +21,25 @@
 (def cbs (atom {}))
 (def id (atom 0))
 (def devtools-url "http://localhost:8315/json")
+(def max-reconnect-attempts
+  "Cap on :reconnect! retries so a permanent connection failure doesn't
+  become an infinite busy loop (was unbounded)."
+  30)
+
+(defn fetch-debugger-info
+  "Discover the CDP WebSocket URL via Node's http module rather than an
+  XHR: the /json endpoint sends no CORS headers, and a file:// page's
+  origin serializes to null, so the XHR fails on modern Chromium.
+  nodeIntegration is on, so a plain http request avoids CORS entirely."
+  [cb]
+  (let [http (js/require "http")
+        req (.get http devtools-url
+                  (fn [res]
+                    (.setEncoding res "utf8")
+                    (let [body (atom "")]
+                      (.on res "data" (fn [chunk] (swap! body str chunk)))
+                      (.on res "end" (fn [] (cb @body))))))]
+    (.on req "error" (fn [_] (cb nil)))))
 
 (defn next-id []
   (swap! id inc))
@@ -102,6 +120,34 @@
                                                                            "anonymous"
                                                                            (:functionName f))]])
 
+;; The Console domain (Console.messageAdded) is deprecated; modern
+;; Chromium reports actual console.*() calls via Runtime.consoleAPICalled
+;; and other diagnostics (network errors, CSP violations, ...) via
+;; Log.entryAdded. Both are adapted into the shape handle-log-msg already
+;; expects rather than changing every handler.
+(defn console-api-called->msg [params]
+  (let [frames (-> params :stackTrace :callFrames)
+        top (first frames)]
+    {:level (case (:type params)
+              "error" "error"
+              "warning" "warning"
+              "log")
+     :text (msg->string {:parameters (:args params)})
+     :url (:url top)
+     :line (:lineNumber top)
+     :parameters (:args params)
+     :stackTrace frames}))
+
+(defn log-entry->msg [entry]
+  (let [frames (-> entry :stackTrace :callFrames)
+        top (first frames)]
+    {:level (:level entry)
+     :text (:text entry)
+     :url (or (:url entry) (:url top))
+     :line (or (:lineNumber entry) (:lineNumber top))
+     :parameters []
+     :stackTrace frames}))
+
 (defmulti handle-log-msg #(:level %2))
 
 (defn valid-error? [text]
@@ -162,27 +208,27 @@
                    (get (files/basename path)))]
     found?))
 
-(defn script-exists? [this id cb]
-  (send this {:id (next-id) :method "Debugger.canSetScriptSource" :params {:scriptId id}}
-        (fn [res]
-          (cb (-> res :result :result)))))
-
 (defn remove-script! [client path id]
   (let [[k v] (first (filter #(= id (:scriptId (second %))) (find-script client path)))]
     (object/update! client [:scripts (files/basename path)] dissoc k)))
 
 (defn changelive! [obj path code cb else]
+  ;; Debugger.canSetScriptSource (which used to pre-check whether the
+  ;; script id was still live) was removed from CDP; just attempt
+  ;; Debugger.setScriptSource directly and let its own reply (routed
+  ;; through send/handle-message like any other command) signal success
+  ;; or failure. On failure, drop the now-stale mapping so a later
+  ;; attempt takes the "script not found" (else) branch instead of
+  ;; retrying the same bad id forever.
   (if-let [s (find-script obj path)]
     (let [id (-> s vals first :scriptId)]
-      (script-exists? obj id
-                      (fn [exists?]
-                        (if-not exists?
-                          (do (remove-script! obj path id) (changelive! obj path code cb))
-                          (do
-                            (object/merge! obj {:script-id id})
-                            ;;TODO: handle multiples
-                            (send obj {:id (next-id) :method "Debugger.setScriptSource" :params {:scriptId id :scriptSource code}}
-                                  cb))))))
+      (object/merge! obj {:script-id id})
+      ;;TODO: handle multiples
+      (send obj {:id (next-id) :method "Debugger.setScriptSource" :params {:scriptId id :scriptSource code}}
+            (fn [res]
+              (when (:error res)
+                (remove-script! obj path id))
+              (cb res))))
     (else)))
 ;;*********************************************************
 ;; Object
@@ -207,7 +253,8 @@
           :triggers #{:connect!}
           :reaction (fn [this url]
                       (object/merge! this {:socket (socket this url)})
-                      (send this {:id (next-id) :method "Console.enable"})
+                      (send this {:id (next-id) :method "Runtime.enable"})
+                      (send this {:id (next-id) :method "Log.enable"})
                       (send this {:id (next-id) :method "Debugger.enable"})
                       (send this {:id (next-id) :method "Network.setCacheDisabled" :params {:cacheDisabled true}})))
 
@@ -240,16 +287,20 @@
                         (object/update! this [:scripts] assoc-in [(files/basename url) url] (:params s)))))
 
 
-(behavior ::console-log
-          :triggers #{:Console.messageAdded}
+(behavior ::runtime-console-api-called
+          :triggers #{:Runtime.consoleAPICalled}
           :reaction (fn [this m]
-                      (let [msg (-> m :params :message)]
-                        (handle-log-msg this msg))))
+                      (handle-log-msg this (console-api-called->msg (:params m)))))
+
+(behavior ::log-entry-added
+          :triggers #{:Log.entryAdded}
+          :reaction (fn [this m]
+                      (handle-log-msg this (log-entry->msg (-> m :params :entry)))))
 
 (behavior ::clear-console
           :triggers #{:clear!}
           :reaction (fn [this]
-                      (send this {:id (next-id) :method "Console.clearMessages"})))
+                      (send this {:id (next-id) :method "Runtime.discardConsoleEntries"})))
 
 (behavior ::disconnect
           :triggers #{:disconnect}
@@ -261,14 +312,19 @@
           :triggers #{:reconnect!}
           :reaction (fn [this]
                       (object/raise this :disconnect)
-                      (fetch/xhr devtools-url {}
-                                 (fn [d]
-                                   (if-let [url (-> (js/JSON.parse d)
-                                                    (js->clj :keywordize-keys true)
-                                                    (find-debugger-info (:url @this))
-                                                    (:webSocketDebuggerUrl))]
-                                     (object/raise this :connect! url)
-                                     (wait 1000 #(object/raise this :reconnect!)))))))
+                      (let [attempt (inc (or (:reconnect-attempts @this) 0))]
+                        (object/merge! this {:reconnect-attempts attempt})
+                        (fetch-debugger-info
+                         (fn [body]
+                           (if-let [url (and body
+                                             (-> (js/JSON.parse body)
+                                                 (js->clj :keywordize-keys true)
+                                                 (find-debugger-info (:url @this))
+                                                 (:webSocketDebuggerUrl)))]
+                             (do (object/merge! this {:reconnect-attempts 0})
+                                 (object/raise this :connect! url))
+                             (when (< attempt max-reconnect-attempts)
+                               (wait 1000 #(object/raise this :reconnect!)))))))))
 
 (behavior ::connect-on-init
           :triggers #{:init}
