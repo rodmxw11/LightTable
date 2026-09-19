@@ -14,26 +14,31 @@ cd "$(dirname "${BASH_SOURCE[0]}")"; cd ..
 ELECTRON_DIR="deploy/electron/node_modules/electron/dist"
 
 # from: http://stackoverflow.com/a/17072017/142317
-if [ "$(uname)" == "Darwin" ]; then
-  OS="mac"
-  PLIST="Electron.app/Contents/Info.plist"
-  RESOURCES="Electron.app/Contents/Resources"
-  PLATFORM_DIR="deploy/platform/mac"
+case "$(uname -s)" in
+  Darwin)
+    OS="mac"
+    PLIST="Electron.app/Contents/Info.plist"
+    RESOURCES="Electron.app/Contents/Resources"
+    PLATFORM_DIR="deploy/platform/mac"
+    ;;
 
-elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
-  OS="linux"
-  RESOURCES="resources"
-  PLATFORM_DIR="deploy/platform/linux"
+  Linux*)
+    OS="linux"
+    RESOURCES="resources"
+    PLATFORM_DIR="deploy/platform/linux"
+    ;;
 
-elif [ "$(expr substr $(uname -s) 1 9)" == "CYGWIN_NT" ]; then
-  OS="windows"
-  RESOURCES="resources"
-  PLATFORM_DIR="deploy/platform/win"
+  CYGWIN_NT*|MINGW*|MSYS*)
+    OS="windows"
+    RESOURCES="resources"
+    PLATFORM_DIR="deploy/platform/win"
+    ;;
 
-else
-  echo "Cannot detect a supported OS."
-  exit 1
-fi
+  *)
+    echo "Cannot detect a supported OS."
+    exit 1
+    ;;
+esac
 
 #----------------------------------------------------------------------
 # Determine release name and output location
@@ -120,10 +125,16 @@ fi
 #----------------------------------------------------------------------
 
 if [ "$1" == "--release" ]; then
-  # Create zip file for Cygwin (Windows) using 7-Zip
+  # Create zip file for Windows
   if [ "$OS" == "windows" ]; then
     pushd "$BUILDS"
-    "/cygdrive/c/Program Files/7-Zip/7z.exe" a $RELEASE_ZIP "$RELEASE/*"
+    if command -v 7z >/dev/null 2>&1; then
+      7z a $RELEASE_ZIP "$RELEASE/*"
+    elif [ -f "/c/Program Files/7-Zip/7z.exe" ]; then
+      "/c/Program Files/7-Zip/7z.exe" a $RELEASE_ZIP "$RELEASE/*"
+    else
+      powershell -NoProfile -Command "Compress-Archive -Path '$RELEASE/*' -DestinationPath '$RELEASE_ZIP' -Force"
+    fi
     popd
   else
     pushd "$BUILDS"

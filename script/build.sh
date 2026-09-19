@@ -7,6 +7,14 @@ set -e
 # This script primarily installs dependencies and sets up
 # the app before calling build-app.sh to build it.
 
+# Optional: point at a specific JDK for this build via LT_JAVA_HOME,
+# without changing the system JAVA_HOME. project.clj targets an old
+# Clojure/ClojureScript toolchain that is safest on JDK 17.
+if [ -n "$LT_JAVA_HOME" ]; then
+  export JAVA_HOME="$LT_JAVA_HOME"
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
+
 # Check if lein is installed
 [ "`which lein`" ] || { echo >&2 "Please install leiningen before running this script."; exit 1; }
 if [ "$(echo `lein version` | grep 'Leiningen \(1.\|2.0\)')" ]; then
@@ -31,10 +39,14 @@ popd
 
 # Build the core cljs
 
-# Workaround for #1025 windows bug
-if [ "$(echo $(uname -s) | cut -c 1-9)" == "CYGWIN_NT" ]; then
-  sed -i 's/:source-map/;;:source-map/' project.clj
-fi
+# Workaround for #1025 windows bug. project.clj is checked in, so restore
+# it on exit rather than leaving the working tree dirty after every build.
+case "$(uname -s)" in
+  CYGWIN_NT*|MINGW*|MSYS*)
+    trap 'git checkout -- project.clj' EXIT
+    sed -i 's/:source-map/;;:source-map/' project.clj
+    ;;
+esac
 rm -f deploy/core/lighttable/bootstrap.js
 lein cljsbuild once app
 

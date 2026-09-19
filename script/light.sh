@@ -8,15 +8,22 @@ set -e
 cd "$(dirname "${BASH_SOURCE[0]}")"; cd ..
 DIR=$(pwd)
 
-if [ "$(uname)" == "Darwin" ]; then
-  CLI="${DIR}/deploy/electron/electron/Electron.app/Contents/MacOS/Electron"
-elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
-  CLI="${DIR}/deploy/electron/electron/electron"
-elif [ "$(expr substr $(uname -s) 1 9)" == "CYGWIN_NT" ]; then
-  CLI="${DIR}/deploy/electron/electron/electron.exe"
-else
-  echo "Cannot detect a supported OS."
-  exit 1
-fi
+ELECTRON_DIR="${DIR}/deploy/electron/node_modules/electron/dist"
+
+case "$(uname -s)" in
+  Darwin)
+    CLI="${ELECTRON_DIR}/Electron.app/Contents/MacOS/Electron"
+    ;;
+  Linux*)
+    CLI="${ELECTRON_DIR}/electron"
+    ;;
+  CYGWIN_NT*|MINGW*|MSYS*)
+    CLI="${ELECTRON_DIR}/electron.exe"
+    ;;
+  *)
+    echo "Cannot detect a supported OS."
+    exit 1
+    ;;
+esac
 
 LT_DEV_CLI=true "$CLI" deploy/core "$@"
