@@ -44,6 +44,16 @@ cd LightTable
 git checkout claude-lighttable
 ```
 
+**Already cloned this earlier?** Pull and do a *full* rebuild rather than
+`script/build-app.sh`. Several of the fixes are in `src/` (so the
+ClojureScript has to be recompiled) and one adds the `ClojureInstarepl`
+plugin to the build's plugin list:
+
+```bash
+git pull origin claude-lighttable
+script/build.sh
+```
+
 ## 3. Build
 
 ```bash
@@ -92,10 +102,11 @@ the Clojure client. Install a JDK 8 alongside whatever you already have:
 sudo apt install openjdk-8-jdk
 ```
 
-Then either launch Light Table with that `java` first on `PATH`:
+Then either launch Light Table with that `java` first on `PATH` (still via
+the `./light` wrapper — see step 4):
 
 ```bash
-PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin:$PATH ./LightTable
+PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin:$PATH ./light
 ```
 
 or point just the Clojure client at it, in **Settings > User Behaviors**:
@@ -159,14 +170,18 @@ Then open a file under `my-project/src/...` in LightTable.
 
 - **Check the Java version first.** By far the most likely cause is the
   runner getting a JDK 9+; the status bar shows "Failed to connect". Run the
-  jar by hand to see the real error:
+  jar by hand to see the real error — from the *packaged* build, since that
+  is what actually runs:
   ```bash
-  cd deploy/plugins/Clojure/runner/resources
-  java -jar ../target/lein-light-standalone.jar LightTable-REPL
+  cd builds/lighttable-0.9.0-linux/resources/app/plugins/Clojure/runner/resources
+  /usr/lib/jvm/java-8-openjdk-amd64/bin/java \
+      -jar ../target/lein-light-standalone.jar LightTable-REPL
   ```
-  A working Java 8 prints `nREPL server started on port ...`. A too-new JDK
-  prints `ExceptionInInitializerError` /
-  `ClassNotFoundException: sun.misc.Launcher$ExtClassLoader`.
+  A working Java 8 prints `nREPL server started on port ...` (after a long
+  first-run dependency download). A too-new JDK prints
+  `ExceptionInInitializerError` /
+  `ClassNotFoundException: sun.misc.Launcher$ExtClassLoader`. Run it with a
+  bare `java` too, to see what the plugin would get by default.
 - The plugin resolves Java via (in order) the `java-exe` behavior above, then
   `JAVA_HOME`, then `java` on `PATH`.
 - Open the Light Table console (**Ctrl+Space** → `Console: Toggle console`)
@@ -187,6 +202,14 @@ that could not be tested from Windows and matter most:
    differs from Windows.
 4. Keyboard input on a non-US layout, if available — the bundled Mousetrap
    fork predates some Chromium keyboard-event changes.
+5. **An InstaRepl evaluates.** Launch with Java 8 on `PATH`, **Ctrl+Space** →
+   `Instarepl: Open a clojure instarepl`, type `(+ 40 2)`. Expect an inline
+   `42` and `Connected to LightTable-REPL` in the status bar. This is
+   verified working on Windows; Linux is unconfirmed.
+6. **Workspace search and fuzzy file navigation** (**Ctrl+Space** →
+   `Navigate: Navigate workspace`). These run in the forked background
+   worker, which was broken until this round of fixes, so they are worth an
+   explicit check on a second platform.
 
 If `./light` fails to launch, or throws a specific sandbox-related error,
 capture the exact output — it's diagnosable even without a Linux environment
