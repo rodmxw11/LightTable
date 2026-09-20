@@ -40,19 +40,43 @@
   "Metadata of current behavior set during raise and raise-reduce"
   nil)
 
+(defn fresh-kw
+  "Re-intern `k` so it carries a hash computed by the ClojureScript runtime
+  we're actually running under.
+
+  Plugins ship JavaScript compiled by older ClojureScript versions than
+  core's, and a compiled keyword literal embeds a hash precomputed at
+  compile time (`new cljs.core.Keyword(ns, name, fqn, hash)`). ClojureScript's
+  keyword hashing changed across those versions, so a keyword baked into an
+  old plugin build is `=` to the one core computes for the same ns/name but
+  reports a *different* hash. Hash maps and sets navigate by hash, so such a
+  keyword silently misses every lookup - a behavior that is genuinely
+  registered can't be found, a tag that is genuinely present can't be
+  matched, and the failure is completely silent.
+
+  Re-interning drops the stale cached hash (cljs.core/keyword builds with a
+  nil hash, computed lazily by current code), which makes these keywords
+  interchangeable again. Applied wherever a keyword crosses from plugin code
+  into the object system: behavior names and triggers, and object tags."
+  [k]
+  (if (keyword? k)
+    (keyword (namespace k) (name k))
+    k))
+
+(defn- fresh-kws
+  "fresh-kw over a collection, preserving the collection type. Object
+  templates declare :tags as either a set or a vector, and a :tags that
+  isn't a set breaks callers that invoke it as a fn (e.g. by-tag)."
+  [ks]
+  (if (seq ks)
+    (into (empty ks) (map fresh-kw) ks)
+    ks))
+
 (defn- add [obj]
   (swap! object-defs assoc (::type obj) obj))
 
 (defn- add-behavior [beh]
-  ;; Keyed by string, not the keyword itself: some plugins ship
-  ;; ClojureScript compiled by an older compiler than core's, and
-  ;; ClojureScript's keyword hashing algorithm has changed across
-  ;; versions. A keyword literal baked into an old plugin build carries
-  ;; a stale precomputed hash, so a hash-based map lookup here can miss
-  ;; an entry that's genuinely present, even though the namespace/name
-  ;; are identical to what core computes for the same keyword today.
-  ;; Strings hash by content, sidestepping this entirely.
-  (swap! behaviors assoc (str (:name beh)) beh))
+  (swap! behaviors assoc (fresh-kw (:name beh)) beh))
 
 (defn ->id
   "Return id of given object"
@@ -62,23 +86,20 @@
     (::id obj)))
 
 (defn- ->behavior-name [beh]
-  (if (coll? beh)
-    (first beh)
-    beh))
+  (fresh-kw (if (coll? beh)
+              (first beh)
+              beh)))
 
 (defn- ->behavior [beh]
-  (@behaviors (str (->behavior-name beh))))
+  (@behaviors (->behavior-name beh)))
 
 (defn- ->triggers [behs]
-  ;; Keyed by string, same reasoning as add-behavior/->behavior above:
-  ;; a :triggers set baked into an old-compiler plugin build (e.g. #{:eval})
-  ;; carries stale keyword hashes too, not just behavior-name keywords, so
-  ;; a fresh keyword raised by core code for "the same" trigger can miss
-  ;; this map entirely under a raw-keyword key.
   (let [result (atom (transient {}))]
     (doseq [beh behs
             t (:triggers (->behavior beh))]
-      (let [t (str t)]
+      ;; a :triggers set baked into an old plugin build (e.g. #{:eval}) holds
+      ;; stale-hash keywords too, so key by the re-interned one - see fresh-kw
+      (let [t (fresh-kw t)]
         (swap! result assoc! t (conj (or (get @result t) '[]) beh))))
     (persistent! @result)))
 
@@ -95,12 +116,12 @@
 
 (defn- ts->negations [ts]
   (let [seen (js-obj)]
-    (doseq [beh (apply concat (map @negated-tags ts))]
+    (doseq [beh (apply concat (map @negated-tags (fresh-kws ts)))]
       (aset seen (->behavior-name beh) true))
     seen))
 
 (defn- tags->behaviors [ts]
-  (let [duped (apply concat (map @tags (specificity-sort ts)))
+  (let [duped (apply concat (map @tags (specificity-sort (fresh-kws ts))))
         de-duped (reduce
                    (fn [res cur]
                      (if (aget (:seen res) (->behavior-name cur))
@@ -119,7 +140,7 @@
     (reverse (persistent! (:final de-duped)))))
 
 (defn- trigger->behaviors [trig ts]
-  (get (->triggers (tags->behaviors ts)) (str trig)))
+  (get (->triggers (tags->behaviors ts)) (fresh-kw trig)))
 
 (defn safe-report-error [e]
   ;; This check is necessary because this can be called before
@@ -157,7 +178,7 @@
 (defn raise
   "Invoke object's behavior fns for given trigger. Args are passed to behavior fns"
   [obj k & args]
-  (let [reactions (-> @obj :listeners (get (str k)))]
+  (let [reactions (-> @obj :listeners (get (fresh-kw k)))]
     (raise* obj reactions args k)))
 
 (defn call-behavior-reaction
@@ -176,21 +197,24 @@
          ;;We need to load new JS files here because they may define the behaviors that we're meant to
          ;;capture. If we have a load, then load and recalculate the triggers to pick up those newly
          ;;defined behaviors
-         trigs (if (get trigs (str :object.instant-load))
+         trigs (if (:object.instant-load trigs)
                  (do
-                   (raise* obj (get trigs (str :object.instant-load)) nil :object.instant-load)
+                   (raise* obj (:object.instant-load trigs) nil :object.instant-load)
                    (->triggers behs))
                  trigs)
          trigs (if instants
                  trigs
-                 (dissoc trigs (str :object.instant) (str :object.instant-load)))]
+                 (dissoc trigs :object.instant :object.instant-load))]
      ;;deref again in case :object.instant-load made any updates
      (assoc @obj :listeners trigs))))
 
 (defn- make-object* [name & r]
   (let [obj (merge {:behaviors #{} :tags #{} :triggers [] :listeners {} ::type name :children {}}
                    (apply hash-map r))]
-    obj))
+    ;; Object templates are often defined in plugin code, so their :tags can
+    ;; carry stale-hash keywords - see fresh-kw. Normalize once here so every
+    ;; tag lookup and set membership test downstream behaves.
+    (update obj :tags fresh-kws)))
 
 (defn- store-object* [obj]
   (add obj)
@@ -250,7 +274,9 @@
 (defn- make-behavior* [name & r]
   (let [be (merge {:name name}
                   (apply hash-map r))]
-    be))
+    ;; behavior definitions come from plugin code too - see fresh-kw
+    (cond-> (update be :name fresh-kw)
+      (:triggers be) (update :triggers #(or (fresh-kws %) #{})))))
 
 (defn- store-behavior* [beh]
   (add-behavior beh)
@@ -276,7 +302,7 @@
   "Reduce over invoked object's behavior fns for given trigger. Start
   is initial value for reduce and any args are passed to behavior fn"
   [obj k start & args]
-  (let [reactions (-> @obj :listeners (get (str k)))]
+  (let [reactions (-> @obj :listeners (get (fresh-kw k)))]
     (reduce (fn [res cur]
               (let [func (:reaction (->behavior cur))
                     args (if (coll? cur)
@@ -349,7 +375,8 @@
                      ::id id
                      :args args
                      :behaviors (set (:behaviors obj))
-                     :tags (set (conj (:tags obj) :object))))
+                     ;; always a set - :tags is invoked as a fn elsewhere
+                     :tags (into #{:object} (map fresh-kw) (:tags obj))))
         inst (store-inst inst)
         _ (merge! inst (update-listeners inst))
         content (when (:init obj)
@@ -396,34 +423,37 @@
 (defn by-tag
   "Find objects that have given tag"
   [tag]
-  (sort-by (comp ::id deref)
-           (filter #(when-let [ts (:tags (deref %))]
-                      (ts tag))
-                   (vals @instances))))
+  (let [tag (fresh-kw tag)]
+    (sort-by (comp ::id deref)
+             (filter #(when-let [ts (:tags (deref %))]
+                        (ts tag))
+                     (vals @instances)))))
 
 (defn- in-tag? [tag behavior]
-  (first (filter #{behavior} (@tags tag))))
+  (first (filter #{behavior} (@tags (fresh-kw tag)))))
 
 (defn has-tag?
   "Return truthy if object has tag"
   [obj tag]
-  ((:tags @obj) tag))
+  ((:tags @obj) (fresh-kw tag)))
 
 (defn add-tags
   "Add tags to given object and updates effected behaviors and listeners.
   ::tags-added trigger is raised on object after update"
   [obj ts]
-  (update! obj [:tags] #(reduce conj % (filter identity ts)))
-  (reset! obj (update-listeners obj))
-  (raise obj ::tags-added ts)
-  (raise* obj (trigger->behaviors :object.instant ts) nil)
-  obj)
+  (let [ts (fresh-kws ts)]
+    (update! obj [:tags] #(reduce conj % (filter identity ts)))
+    (reset! obj (update-listeners obj))
+    (raise obj ::tags-added ts)
+    (raise* obj (trigger->behaviors :object.instant ts) nil)
+    obj))
 
 (defn remove-tags
   "Remove tags from given object and updates effected behaviors and listeners.
   ::tags-removed trigger is raised on object after update"
   [obj ts]
-  (let [cur @obj
+  (let [ts (fresh-kws ts)
+        cur @obj
         behs (apply concat (map @tags ts))
         cur (-> cur
                 (update-in [:tags] #(reduce disj % ts))
@@ -437,18 +467,20 @@
 (defn tag-behaviors
   "Associate behaviors to given tag and refresh objects with given tag"
   [tag behs]
-  (swap! tags update-in [tag] #(reduce conj
-                                       (or % '())
-                                       behs))
-  (doseq [cur (by-tag tag)]
-    (refresh! cur))
-  (@tags tag))
+  (let [tag (fresh-kw tag)]
+    (swap! tags update-in [tag] #(reduce conj
+                                         (or % '())
+                                         behs))
+    (doseq [cur (by-tag tag)]
+      (refresh! cur))
+    (@tags tag)))
 
 (defn- remove-tag-behaviors [tag behs]
-  (swap! tags update-in [tag] #(remove (set behs) (or % '())))
-  (doseq [cur (by-tag tag)
-          b behs]
-    (rem-behavior! cur b)))
+  (let [tag (fresh-kw tag)]
+    (swap! tags update-in [tag] #(remove (set behs) (or % '())))
+    (doseq [cur (by-tag tag)
+            b behs]
+      (rem-behavior! cur b))))
 
 (behavior ::add-tag
           :desc "App: Add tag to object"

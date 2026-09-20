@@ -1000,7 +1000,7 @@
                       (load/js "core/node_modules/codemirror/addon/edit/closebrackets.js" :sync)
                       (load/js "core/node_modules/codemirror/addon/comment/comment.js" :sync)
                       (load/js "core/node_modules/codemirror/addon/selection/active-line.js" :sync)
-                      (load/js "core/node_modules/codemirror/addon/mode/overlay.js" :sync)
+                      (load/js "core/lighttable/codemirror/overlay.js" :sync)
                       (load/js "core/node_modules/codemirror/addon/scroll/scrollpastend.js" :sync)
                       (doseq [file (files/ls (files/lt-home "core/node_modules/codemirror/addon/fold"))
                               :when (= (files/ext file) "js")]
