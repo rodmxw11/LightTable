@@ -44,7 +44,15 @@
   (swap! object-defs assoc (::type obj) obj))
 
 (defn- add-behavior [beh]
-  (swap! behaviors assoc (:name beh) beh))
+  ;; Keyed by string, not the keyword itself: some plugins ship
+  ;; ClojureScript compiled by an older compiler than core's, and
+  ;; ClojureScript's keyword hashing algorithm has changed across
+  ;; versions. A keyword literal baked into an old plugin build carries
+  ;; a stale precomputed hash, so a hash-based map lookup here can miss
+  ;; an entry that's genuinely present, even though the namespace/name
+  ;; are identical to what core computes for the same keyword today.
+  ;; Strings hash by content, sidestepping this entirely.
+  (swap! behaviors assoc (str (:name beh)) beh))
 
 (defn ->id
   "Return id of given object"
@@ -59,13 +67,19 @@
     beh))
 
 (defn- ->behavior [beh]
-  (@behaviors (->behavior-name beh)))
+  (@behaviors (str (->behavior-name beh))))
 
 (defn- ->triggers [behs]
+  ;; Keyed by string, same reasoning as add-behavior/->behavior above:
+  ;; a :triggers set baked into an old-compiler plugin build (e.g. #{:eval})
+  ;; carries stale keyword hashes too, not just behavior-name keywords, so
+  ;; a fresh keyword raised by core code for "the same" trigger can miss
+  ;; this map entirely under a raw-keyword key.
   (let [result (atom (transient {}))]
     (doseq [beh behs
             t (:triggers (->behavior beh))]
-      (swap! result assoc! t (conj (or (get @result t) '[]) beh)))
+      (let [t (str t)]
+        (swap! result assoc! t (conj (or (get @result t) '[]) beh))))
     (persistent! @result)))
 
 (defn- specificity-sort
@@ -105,7 +119,7 @@
     (reverse (persistent! (:final de-duped)))))
 
 (defn- trigger->behaviors [trig ts]
-  (get (->triggers (tags->behaviors ts)) trig))
+  (get (->triggers (tags->behaviors ts)) (str trig)))
 
 (defn safe-report-error [e]
   ;; This check is necessary because this can be called before
@@ -143,7 +157,7 @@
 (defn raise
   "Invoke object's behavior fns for given trigger. Args are passed to behavior fns"
   [obj k & args]
-  (let [reactions (-> @obj :listeners k)]
+  (let [reactions (-> @obj :listeners (get (str k)))]
     (raise* obj reactions args k)))
 
 (defn call-behavior-reaction
@@ -162,14 +176,14 @@
          ;;We need to load new JS files here because they may define the behaviors that we're meant to
          ;;capture. If we have a load, then load and recalculate the triggers to pick up those newly
          ;;defined behaviors
-         trigs (if (:object.instant-load trigs)
+         trigs (if (get trigs (str :object.instant-load))
                  (do
-                   (raise* obj (:object.instant-load trigs) nil :object.instant-load)
+                   (raise* obj (get trigs (str :object.instant-load)) nil :object.instant-load)
                    (->triggers behs))
                  trigs)
          trigs (if instants
                  trigs
-                 (dissoc trigs :object.instant :object.instant-load))]
+                 (dissoc trigs (str :object.instant) (str :object.instant-load)))]
      ;;deref again in case :object.instant-load made any updates
      (assoc @obj :listeners trigs))))
 
@@ -262,7 +276,7 @@
   "Reduce over invoked object's behavior fns for given trigger. Start
   is initial value for reduce and any args are passed to behavior fn"
   [obj k start & args]
-  (let [reactions (-> @obj :listeners k)]
+  (let [reactions (-> @obj :listeners (get (str k)))]
     (reduce (fn [res cur]
               (let [func (:reaction (->behavior cur))
                     args (if (coll? cur)

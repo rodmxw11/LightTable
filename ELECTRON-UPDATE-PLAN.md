@@ -266,6 +266,25 @@ Verified end-to-end via CDP against a live instance: the local devtools client (
 
 ---
 
+## Post-9: a real, pre-existing bug found via actual InstaRepl use (not the Electron upgrade)
+
+After all nine phases shipped, real usage on Ubuntu (and reproduced on Windows) found that InstaRepl never activates for the Clojure language plugin. Root cause, found through extensive live CDP tracing, turned out to be **two-layered** and **entirely unrelated to Electron** — a latent bug in LightTable's own BOT (Behaviors/Objects/Tags) core that's been there since whenever core's ClojureScript version and the bundled `Clojure` plugin's pre-built JS drifted apart:
+
+1. **Behavior-name keywords.** The Clojure plugin ships a pre-compiled `deploy/plugins/Clojure/clojure_compiled.js` built by an old ClojureScript compiler (the plugin's own `lein-light-nrepl` pins `clojurescript "0.0-3308"`, hundreds of releases behind core's `1.10.844`). ClojureScript keywords carry a precomputed hash baked in at compile time, and the hashing algorithm changed between these versions. `lt.object`'s global behavior registry (`(def behaviors (atom {}))`) is keyed by these keyword objects — a stale-hash keyword from the plugin doesn't hash-match a fresh keyword for the same `ns/name` read from `clojure.behaviors` (EDN) by core's current reader, so `->behavior` misses entries that are genuinely registered. Confirmed by linear-scanning the map by name instead of by keyed lookup, and by decompiling the exact baked-in hash values in `clojure_compiled.js`.
+2. **Trigger keywords.** The same staleness affects the `:triggers #{:eval}`-style sets *inside* each behavior definition. `lt.object`'s per-object `:listeners` map (trigger keyword → behavior list, built by `->triggers`) is keyed the same way, so `object/raise`/`object/raise-reduce` calling with a freshly-compiled trigger keyword (e.g. `:eval.one`, compiled fresh into core's `bootstrap.js`) also misses the entry.
+
+Rebuilding the plugin properly was investigated and ruled out: `deploy/plugins/Clojure/build.sh` only builds the JVM-side jar, not `clojure_compiled.js` — there is no preserved build config anywhere in the repo for the JS side, so a rebuild would mean reverse-engineering an undocumented process with real risk of breaking the ~69 *other* plugin behaviors that currently work fine.
+
+**Fix, entirely within `src/lt/object.cljs`** (general — fixes this class of bug for any plugin with the same staleness, not just Clojure):
+- `add-behavior`/`->behavior`/`trigger->behaviors`: key the behavior registry by `(str name)` instead of the raw keyword.
+- `->triggers`: key the per-trigger map by `(str t)` instead of the raw trigger keyword.
+- `raise`/`raise-reduce`: look up `:listeners` via `(get listeners (str k))` instead of a raw keyword-as-function call.
+- `update-listeners`'s `:object.instant`/`:object.instant-load` handling updated to match (was silently no-op-ing on `dissoc` with the old keys — a correctness bug not to reintroduce).
+
+**Verified extensively via live CDP** before and after each layer of the fix (isolating the exact failure point — `tags->behaviors` was correct, `->triggers` was the actual break — is what surfaced the second, deeper hash issue): the full pre-existing regression suite re-run clean (find/replace, autocomplete, browser tab CSS/CLJS eval, console log migration all still pass identically), the previously-`nil` `:eval`/`:eval.one` listeners now correctly resolve to `on-eval.clj`/`on-eval.one`, and triggering eval on a real `.clj` file spawns real `java.exe` processes running the bundled nREPL jar (confirmed via `tasklist`) — the connection flow that was completely dead before now genuinely runs.
+
+---
+
 ## Verification
 
 **On Windows (dev box) — covers Phases 0–2, 4–7:**
