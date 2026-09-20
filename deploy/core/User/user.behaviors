@@ -31,6 +31,18 @@
  ;; Here we can add behaviors to just clojure editors
  [:editor.clojure :lt.plugins.clojure/print-length 1000]
 
+ ;; The bundled Clojure nREPL runner (lein-light-standalone.jar) embeds
+ ;; Leiningen 2.5.2, whose dynapath references sun.misc.Launcher$ExtClassLoader
+ ;; - a class removed in Java 9. It therefore needs a Java 8 runtime; 11, 17
+ ;; and 21 all fail identically with ClassNotFoundException. The rest of Light
+ ;; Table is unaffected, so point just the Clojure client at a JDK 8:
+ ;;  [:clojure.lang :lt.plugins.clojure/java-exe "/path/to/jdk8/bin/java"]
+ ;; Note this behavior only takes effect once behaviors are re-applied, which
+ ;; happens whenever a .behaviors file is saved - on a cold start the Clojure
+ ;; plugin sets up its language object before this can run. If you would rather
+ ;; not think about that, just make sure a Java 8 `java` is first on the PATH
+ ;; that Light Table is launched with.
+
  ;; Behaviors specific to a user-defined object
  [:user.hello :lt.plugins.user/on-close-destroy]
 

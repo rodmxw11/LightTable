@@ -301,6 +301,26 @@ Result, traced live end to end: `on-eval.one` → `eval!` → `try-connect` → 
 
 ---
 
+### Follow-up 2: InstaRepl actually working — and what stood between it and the last follow-up
+
+With a Java 8 JDK installed (Temurin `1.8.0_504`), the runner starts cleanly: `nREPL server started on port 64515`. Installing `ClojureInstarepl,0.3.0` then exposed **five further bugs**, four of them pre-existing in core and affecting far more than InstaRepl. End state: an InstaRepl tab evaluates `(+ 40 2)` to an inline `42` as you type, status bar `Connected to LightTable-REPL`, zero exceptions.
+
+**1. The keyword-hash fix was still whack-a-mole; replaced with one global fix.** `fresh-kw` was applied at each boundary as it was discovered — and discovery kept continuing: the command registry (`lt.objs.command`) was a third registry with the same problem, meaning *every plugin-registered command* was unreachable from the command bar and from `exec!`. Measured: stored `:instarepl` hashes to `1043123260`, a fresh one to `-1983907341`, `=` is true, and `get` with the fresh key returns nil. `@object-defs` was a fourth. Worse, **per-site normalization cannot fix the plugin→core read direction at all**: `(:ed @obj)` inside a plugin, reading a key core wrote, misses no matter what core normalizes.
+
+  The general fix, in `LightTable.html` right after `bootstrap.js` loads: override `cljs.core.Keyword.prototype.cljs$core$IHash$_hash$arity$1` to recompute from `ns`/`name` via `cljs.core.hash_keyword` instead of trusting the compile-time-baked `_hash`, caching the corrected value per instance. Plugins share core's single `cljs.core`, and `cljs.core/hash` always dispatches through this method, so this repairs every stale keyword in both directions at once. Core's own keywords already hash to exactly this value, so it is a no-op for them. It must run before `app.init()`, i.e. before anything is stored in a hash map. The `fresh-kw` call sites are kept — they are now redundant for hashing but still do the collection-type normalization `:tags` needs.
+
+**2. `crate` no longer exists — core moved to `singultus`.** Core's hiccup library is now `[org.clojars.prertik/singultus]`, aliased to `crate` *in source* but compiling to the global `singultus.*`. Every plugin built before that switch — i.e. all of the ones `script/build.sh` installs, plus any user `user_compiled.js` — references the `crate.*` global and dies with `crate is not defined` the moment it builds DOM. The failure mode is a plugin that loads without complaint and then renders nothing. Aliased `window.crate` to `{core, binding, util}` from `singultus` alongside the fix above.
+
+**3. `make-object*` and `make-behavior*` were silently producing duplicate keys.** Both do `(merge {defaults…} (apply hash-map r))` where `r` comes from plugin-compiled code. A plugin's `:init` and core's `:init` hashed differently, so the merge kept *both*, the defaults overrode nothing, and `(:init obj)` found nothing — objects were created **without ever being initialized**, silently. This is what made the InstaRepl tab render blank: `:init` never ran, so `:main` was never set, and `on-show-refresh-eds` then derefed nil. Fixed by normalizing `r`'s keys before the merge.
+
+**4. `background` workers were broken by the ClojureScript upgrade.** `lt/macros.cljc` did `(.map orig# cljs.reader/read-string)`. `Array.prototype.map` calls its callback with `(element, index, array)`; `read-string` is multi-arity in cljs 1.10.844, so every background call threw `Invalid arity: 3`. Phase 2b turned `cljsDeps.js` back on but this kept the workers dead. Wrapped in a 1-arg fn. (Also removed five leftover `console.log` debug statements that fired on every worker call.)
+
+**5. `ClojureInstarepl`'s bundle redefines `lt.plugins.clojure`.** Its compiled JS contains a copy of the Clojure plugin namespace (222 references) and loads *after* it, so its copy wins — including `(def jar-path (files/join plugins/*plugin-dir* "runner/…"))`, which therefore resolves against `ClojureInstarepl/` instead of `Clojure/`. `script/build.sh` now hard-links the runner jar (and copies `runner/resources`, the runner's cwd) into `ClojureInstarepl/` so it is reachable from both; a link rather than a copy because the jar is ~15MB and the two must not drift.
+
+**Known remaining wrinkle (plugin bug, not core).** The `java-exe` user behavior is `:object.instant`, and the plugin's reaction ignores its `this` argument in favour of its own `clj-lang` global — which `object/create` has not yet assigned when it raises `:object.instant`. So on a cold start it throws and the path isn't applied; it lands correctly as soon as behaviors are re-applied (any `.behaviors` save). Documented in `deploy/core/User/user.behaviors` and `UBUNTU-START.md`, with "put a Java 8 `java` first on `PATH`" as the caveat-free alternative.
+
+---
+
 ## Verification
 
 **On Windows (dev box) — covers Phases 0–2, 4–7:**

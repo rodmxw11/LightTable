@@ -49,6 +49,49 @@
                 // bundled npm libraries, and Electron's own internal
                 // <webview> code — needs the real object, not the shim.
                 window.process = window.__electronProcess;
+
+                // Core's hiccup library used to be `crate`; it is now
+                // `singultus`, a maintained fork with the same API (core's
+                // own source still aliases it to `crate`, but the compiled
+                // global is `singultus.*`). Every plugin built before that
+                // switch — including the ones script/build.sh installs —
+                // ships JavaScript referencing the `crate.*` global, so
+                // without this alias they die with "crate is not defined"
+                // the moment they build any DOM. That surfaces as a plugin
+                // that loads without complaint and then renders nothing.
+                if (typeof window.crate === "undefined" &&
+                    typeof window.singultus !== "undefined") {
+                    window.crate = {core: singultus.core,
+                                    binding: singultus.binding,
+                                    util: singultus.util};
+                }
+
+                // A compiled ClojureScript keyword literal bakes in a hash
+                // computed at *compile* time: new Keyword(ns, name, fqn, hash).
+                // ClojureScript's keyword hashing changed between the version
+                // the bundled plugins were built with and core's, so a plugin's
+                // :foo is = to core's :foo but reports a different hash. Hash
+                // maps and sets navigate by hash, so every such lookup silently
+                // misses in BOTH directions - core can't find a key a plugin
+                // wrote, and a plugin can't find a key core wrote. Nothing
+                // throws; things are just inexplicably nil.
+                //
+                // Plugins share this one cljs.core (they don't bundle their
+                // own), and cljs.core/hash always dispatches through this
+                // protocol method, so recomputing here from ns/name fixes every
+                // stale keyword at once. Core's own keywords already hash to
+                // exactly this value, so for them it's a no-op. Must run before
+                // app.init(), i.e. before anything is stored in a hash map.
+                if (typeof cljs !== "undefined" && cljs.core && cljs.core.Keyword) {
+                    cljs.core.Keyword.prototype.cljs$core$IHash$_hash$arity$1 = function() {
+                        if (this.__ltRehashed !== true) {
+                            this._hash = cljs.core.hash_keyword(this);
+                            this.__ltRehashed = true;
+                        }
+                        return this._hash;
+                    };
+                }
+
                 lt.objs.app.init();
             } catch (e) {
                 console.error(e);

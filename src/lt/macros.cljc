@@ -97,18 +97,15 @@
   [func]
   `(lt.objs.thread/thread*
     (fn ~(gensym "tfun") []
-      (.log js/console "BACKGROUND:")
-      (.log js/console "ARGS:" (cljs.core/js-arguments))
-      (.log js/console "ARR:" (js/argsArray (cljs.core/js-arguments)))
       (let [orig# (js/argsArray (cljs.core/js-arguments))
             msg# (.shift orig#)
-            args# (.map orig# cljs.reader/read-string)
+            ;; Array.prototype.map hands its callback (element, index, array).
+            ;; cljs.reader/read-string is multi-arity, so passing it directly
+            ;; invokes it with 3 arguments and throws "Invalid arity: 3",
+            ;; killing every background worker call. Wrap it to take one.
+            args# (.map orig# (fn [s#] (cljs.reader/read-string s#)))
             ~'raise (fn [obj# k# v#]
                       (js/_send obj# k# (pr-str v#) "clj"))]
-        ;; (.unshift args# (.-obj msg#))
-        ;; (.apply ~func nil args#)
-        (.log js/console "MAPARG:" (pr-str (cons (.-obj msg#) args#)) (pr-str args#))
-        (.log js/console "MAPARG2:" (pr-str (cljs.core/to-array (cons (.-obj msg#) args#))) (pr-str args#))
         (.apply ~func nil (cljs.core/to-array (cons (.-obj msg#) args#)))))))
 
 (defmacro ^:private aloop [[var arr] & body]

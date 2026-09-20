@@ -14,17 +14,25 @@
   * :exec (required)  - Function to invoke when command is called
   * :hidden - When true, command is hidden from command bar. Not set by default"
   [cmd]
-  (assert (every? cmd required-keys)
-          (str "Command doesn't have required keys: " required-keys))
-  (object/update! manager [:commands] assoc (:command cmd) cmd)
-  (when (:options cmd)
-    (object/add-tags (:options cmd) [:command.options]))
-  (object/raise manager :added cmd))
+  ;; Commands are overwhelmingly registered from plugin JS compiled by an older
+  ;; ClojureScript than core's, so both the map's keys and the :command keyword
+  ;; itself can carry stale hashes and silently miss every lookup - the command
+  ;; registers fine but is unreachable from the command bar, a keybinding, or
+  ;; exec!. Normalize on the way in. See lt.object/fresh-kw.
+  (let [cmd (object/fresh-kw-keys cmd)]
+    (assert (every? cmd required-keys)
+            (str "Command doesn't have required keys: " required-keys))
+    (object/update! manager [:commands] assoc (object/fresh-kw (:command cmd)) cmd)
+    (when (:options cmd)
+      (object/add-tags (:options cmd) [:command.options]))
+    (object/raise manager :added cmd)))
 
 (defn- by-id [k]
-  (-> @manager :commands (get (if (map? k)
-                                (:command k)
-                                k))))
+  ;; Callers include plugin code passing its own keyword literals, so the
+  ;; lookup key needs the same normalization registration applies.
+  (-> @manager :commands (get (object/fresh-kw (if (map? k)
+                                                 (:command k)
+                                                 k)))))
 
 (defn- completions [token]
   (if (and token

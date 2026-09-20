@@ -72,8 +72,22 @@
     (into (empty ks) (map fresh-kw) ks)
     ks))
 
+(defn fresh-kw-keys
+  "fresh-kw over the top-level keys of map `m`.
+
+  For maps that cross from plugin code into core and are then read with
+  core's own keyword literals (e.g. a command map, whose :exec core has to
+  find in order to run it). Values are untouched - only the keys are
+  re-interned. See `fresh-kw` for why this is necessary."
+  [m]
+  (if (map? m)
+    (persistent! (reduce-kv (fn [acc k v] (assoc! acc (fresh-kw k) v))
+                            (transient {})
+                            m))
+    m))
+
 (defn- add [obj]
-  (swap! object-defs assoc (::type obj) obj))
+  (swap! object-defs assoc (fresh-kw (::type obj)) obj))
 
 (defn- add-behavior [beh]
   (swap! behaviors assoc (fresh-kw (:name beh)) beh))
@@ -209,11 +223,17 @@
      (assoc @obj :listeners trigs))))
 
 (defn- make-object* [name & r]
-  (let [obj (merge {:behaviors #{} :tags #{} :triggers [] :listeners {} ::type name :children {}}
-                   (apply hash-map r))]
-    ;; Object templates are often defined in plugin code, so their :tags can
-    ;; carry stale-hash keywords - see fresh-kw. Normalize once here so every
-    ;; tag lookup and set membership test downstream behaves.
+  (let [;; Object templates are usually defined in plugin code, so every key in
+        ;; `r` can carry a stale hash - see fresh-kw. Normalize before merging:
+        ;; otherwise a plugin's :init and core's :init are distinct keys, the
+        ;; defaults below don't override anything, and the template ends up
+        ;; holding both. Core then can't find :init at all, so the object is
+        ;; created without ever being initialized - silently, since nothing
+        ;; throws. Normalizing the keys also collapses those duplicates.
+        obj (merge {:behaviors #{} :tags #{} :triggers [] :listeners {} ::type (fresh-kw name) :children {}}
+                   (fresh-kw-keys (apply hash-map r)))]
+    ;; :tags is invoked as a fn elsewhere (e.g. by-tag), and its *values* need
+    ;; the same treatment as the keys above.
     (update obj :tags fresh-kws)))
 
 (defn- store-object* [obj]
@@ -272,9 +292,10 @@
       (handle-redef)))
 
 (defn- make-behavior* [name & r]
-  (let [be (merge {:name name}
-                  (apply hash-map r))]
-    ;; behavior definitions come from plugin code too - see fresh-kw
+  (let [;; behavior definitions come from plugin code too - see fresh-kw and
+        ;; the same duplicate-key trap described in make-object*
+        be (merge {:name name}
+                  (fresh-kw-keys (apply hash-map r)))]
     (cond-> (update be :name fresh-kw)
       (:triggers be) (update :triggers #(or (fresh-kws %) #{})))))
 
@@ -368,7 +389,7 @@
   * :init trigger is raised"
   [obj-name & args]
   (let [obj (if (keyword? obj-name)
-              (@object-defs obj-name)
+              (@object-defs (fresh-kw obj-name))
               obj-name)
         id (or (::id obj) (swap! obj-id inc))
         inst (atom (assoc (dissoc obj :init)
@@ -412,7 +433,7 @@
 (defn- ->def [def|name]
   (if (map? def|name)
     def|name
-    (@object-defs def|name)))
+    (@object-defs (fresh-kw def|name))))
 
 (defn by-id
   "Find object by its unique numerical id"

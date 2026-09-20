@@ -48,6 +48,17 @@ When exploring the codebase, prefer the in-app searcher / doc searcher over gues
 
 This entire directory is `npm install`-populated at build time and gitignored — nothing under it is committed, and `forkedDependencies` in `deploy/core/package.json` is now empty (as of commit `000cc9b`, "npm install happens at build, no more forking of libraries"). LT-specific JS lives instead in the **committed** `deploy/core/lighttable/` directory — notably `deploy/core/lighttable/codemirror/` (forks of CodeMirror's search/hint addons with LT-specific APIs, *not* drop-in replacements for the upstream addons — see its README before touching them) and `deploy/core/lighttable/background/` (the worker scripts above).
 
+### Legacy-plugin compatibility shims (`deploy/core/LightTable.html`)
+
+The bundled plugins (`script/build.sh`'s `PLUGINS` list) are precompiled JavaScript from ~2015, and two shims installed right after `bootstrap.js` loads — before `lt.objs.app.init()` — are what let them run at all. Both fail *silently* if removed, so don't "clean them up":
+
+- **Keyword hashing.** A compiled cljs keyword literal bakes in a compile-time hash. The algorithm changed between the plugins' ClojureScript and core's, so a plugin's `:foo` is `=` to core's but hashes differently, and every hash-map/set lookup misses in both directions — nothing throws, values are just inexplicably nil. The shim overrides `cljs.core.Keyword.prototype.cljs$core$IHash$_hash$arity$1` to recompute from `ns`/`name`. Plugins share core's single `cljs.core`, so this fixes all of them at once. `lt.object/fresh-kw` and `fresh-kw-keys` predate it and remain for collection-type normalization.
+- **`crate` → `singultus`.** Core's hiccup library is `singultus`, aliased to `crate` in source but compiling to the `singultus.*` global. Plugins reference the old `crate.*` global; the shim aliases it.
+
+### The Clojure plugin needs Java 8
+
+`lein-light-standalone.jar` embeds Leiningen 2.5.2, which references `sun.misc.Launcher$ExtClassLoader` — removed in Java 9. It fails on JDK 11/17/21 alike. Only the Clojure client is affected; the build itself wants JDK 17. See `UBUNTU-START.md`.
+
 ### Editing/evaling ClojureScript live
 
 LT can eval its own source inside a running instance (the intended dev workflow, see `doc/workflow.md`). Only eval individual top-level forms, not whole files — re-evaling certain files (e.g. `object.cljs`, `editor.cljs`) can redefine core object types/redefine app state and freeze or break the running instance.

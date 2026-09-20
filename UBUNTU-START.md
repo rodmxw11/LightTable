@@ -13,6 +13,11 @@ sudo apt update
 sudo apt install -y git curl openjdk-17-jdk build-essential
 ```
 
+JDK 17 is for *building* (it matches the pinned `clojurescript 1.10.844`).
+If you also want the Clojure plugin's REPL, add `openjdk-8-jdk` — the
+bundled nREPL runner cannot run on anything newer. See
+"Using the Clojure plugin / InstaRepl" below for why.
+
 Leiningen (not reliably available via apt — install directly):
 
 ```bash
@@ -70,15 +75,54 @@ sudo chmod 4755 builds/lighttable-0.9.0-linux/chrome-sandbox
 
 ## Using the Clojure plugin / InstaRepl
 
-There are two distinct paths, depending on what you're editing. Which one
-applies is decided automatically by whether a `project.clj` exists in a
-parent directory of the file you have open — you don't choose it explicitly.
+### You need a Java 8 JDK for this (only for this)
 
-InstaRepl itself only appears once a client actually connects; opening a
-`.clj` file alone doesn't trigger it. Eval something (place the cursor at
-the end of an expression and hit **Ctrl+Enter**) to trigger the connection.
+Read this first — nothing below works without it.
 
-### Path A — just trying it out (no setup beyond a JDK)
+The bundled nREPL runner (`lein-light-standalone.jar`) embeds Leiningen
+2.5.2, whose `dynapath` references `sun.misc.Launcher$ExtClassLoader`. That
+class was **removed in Java 9**, so the runner dies at startup with
+`ClassNotFoundException` on JDK 11, 17 and 21 alike (all three verified). No
+JVM flag works around it — the class simply isn't there.
+
+Everything else in Light Table is happy on a modern JDK; this applies only to
+the Clojure client. Install a JDK 8 alongside whatever you already have:
+
+```bash
+sudo apt install openjdk-8-jdk
+```
+
+Then either launch Light Table with that `java` first on `PATH`:
+
+```bash
+PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin:$PATH ./LightTable
+```
+
+or point just the Clojure client at it, in **Settings > User Behaviors**:
+
+```clojure
+[:clojure.lang :lt.plugins.clojure/java-exe "/usr/lib/jvm/java-8-openjdk-amd64/bin/java"]
+```
+
+The behavior route has one wrinkle: it takes effect only after behaviors are
+re-applied, which happens whenever a `.behaviors` file is saved. On a cold
+start the Clojure plugin builds its language object before the behavior can
+run, so the first connection attempt still uses `java` from `PATH`. Saving
+`user.behaviors` once (Ctrl+S in that tab) applies it for the rest of the
+session. The `PATH` route has no such caveat, which is why it's listed first.
+
+### Opening an InstaRepl
+
+InstaRepl is a *separate plugin* (`ClojureInstarepl`), split out of the
+Clojure plugin in its 0.3.0 release. `script/build.sh` installs it. It does
+not appear on its own — open one explicitly with **Ctrl+Space** →
+`Instarepl: Open a clojure instarepl`. Type an expression and it evaluates
+as you type; the `live` toggle in the top right turns that off.
+
+To turn an existing `.clj` editor into one instead, use
+`Instarepl: Make current editor an instarepl`.
+
+### Path A — just trying it out (no project)
 
 The Clojure plugin ships its own self-contained runtime —
 `deploy/plugins/Clojure/runner/target/lein-light-standalone.jar` — with
@@ -86,8 +130,10 @@ Clojure 1.5.1 and nREPL already bundled in. If the open `.clj` file has
 **no `project.clj`** anywhere above it (including a brand-new, unsaved
 buffer), the plugin automatically falls back to this bundled
 "LightTable-REPL". No Leiningen, no separate Clojure install, nothing to
-configure — the only external dependency is a JDK on `PATH`, which the
-Prerequisites step above already installs.
+configure beyond the Java 8 requirement above.
+
+The first connection is slow — the runner resolves its dependencies from
+Maven Central and Clojars into `~/.m2` on first launch. Later ones are fast.
 
 1. Open or create a `.clj` file.
 2. Type an expression, e.g. `(+ 1 2)`.
@@ -111,16 +157,21 @@ Then open a file under `my-project/src/...` in LightTable.
 
 ### If it still doesn't connect
 
-- The plugin auto-detects Java via (in order) a manual override, then
-  `JAVA_HOME`, then `which java` on `PATH`. Confirm `which java` on the
-  Ubuntu machine actually resolves to a JDK 11+ binary.
-- A manual override is available via **Settings > User Behaviors** if
-  auto-detection ever points at the wrong Java ("Clojure: set the path to
-  the Java executable for clients").
-- If you still see a "couldn't find java" popup after pulling the latest
-  `claude-lighttable` and rebuilding (`script/build-app.sh` is enough —
-  this particular fix doesn't touch ClojureScript), that's worth reporting
-  back with the exact error text.
+- **Check the Java version first.** By far the most likely cause is the
+  runner getting a JDK 9+; the status bar shows "Failed to connect". Run the
+  jar by hand to see the real error:
+  ```bash
+  cd deploy/plugins/Clojure/runner/resources
+  java -jar ../target/lein-light-standalone.jar LightTable-REPL
+  ```
+  A working Java 8 prints `nREPL server started on port ...`. A too-new JDK
+  prints `ExceptionInInitializerError` /
+  `ClassNotFoundException: sun.misc.Launcher$ExtClassLoader`.
+- The plugin resolves Java via (in order) the `java-exe` behavior above, then
+  `JAVA_HOME`, then `java` on `PATH`.
+- Open the Light Table console (**Ctrl+Space** → `Console: Toggle console`)
+  and read the actual error rather than guessing — connection failures are
+  reported there, not in a popup.
 
 ## What to actually verify
 

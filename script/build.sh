@@ -75,8 +75,13 @@ rm -f deploy/core/lighttable/bootstrap.js
 lein cljsbuild once app
 
 # Fetch plugins
-PLUGINS=("Clojure,0.3.3" "CSS,0.0.6" "HTML,0.1.0" "Javascript,0.2.0"
-         "Paredit,0.0.4" "Python,0.0.7" "Rainbow,0.0.8")
+# ClojureInstarepl was split out of the Clojure plugin in its 0.3.0 release
+# ("Split out instarepl into its own plugin - ClojureInstarepl", Clojure
+# CHANGELOG 0.3.0) but was never added here, so builds since then have had no
+# InstaRepl at all. The server half still ships inside lein-light-standalone.jar
+# (dependency lein-light-nrepl-instarepl), so only the client plugin was missing.
+PLUGINS=("Clojure,0.3.3" "ClojureInstarepl,0.3.0" "CSS,0.0.6" "HTML,0.1.0"
+         "Javascript,0.2.0" "Paredit,0.0.4" "Python,0.0.7" "Rainbow,0.0.8")
 
 # Plugins cache
 mkdir -p deploy/plugins
@@ -101,5 +106,28 @@ pushd deploy/plugins
       fi
   done
 popd
+
+# ClojureInstarepl's compiled JS bundles a copy of the lt.plugins.clojure
+# namespace, and it loads after the Clojure plugin, so its copy wins. That
+# includes `(def jar-path (files/join plugins/*plugin-dir* "runner/..."))`,
+# which is therefore resolved against ClojureInstarepl's directory rather than
+# Clojure's - so the nREPL runner has to be reachable from both. Link it rather
+# than copy it: the jar is ~15MB and the two must not drift apart.
+CLJ_JAR="deploy/plugins/Clojure/runner/target/lein-light-standalone.jar"
+if [ -f "$CLJ_JAR" ] && [ -d deploy/plugins/ClojureInstarepl ]; then
+  mkdir -p deploy/plugins/ClojureInstarepl/runner/target
+  INSTA_JAR="deploy/plugins/ClojureInstarepl/runner/target/lein-light-standalone.jar"
+  if [ ! -f "$INSTA_JAR" ]; then
+    echo "Linking the Clojure nREPL runner into ClojureInstarepl..."
+    ln "$CLJ_JAR" "$INSTA_JAR" 2>/dev/null || cp "$CLJ_JAR" "$INSTA_JAR"
+  fi
+  # The runner is launched with its resources dir as cwd (it holds the
+  # project.clj the standalone Leiningen reads), so that has to come along too.
+  if [ -d deploy/plugins/Clojure/runner/resources ] &&
+     [ ! -d deploy/plugins/ClojureInstarepl/runner/resources ]; then
+    cp -R deploy/plugins/Clojure/runner/resources \
+          deploy/plugins/ClojureInstarepl/runner/resources
+  fi
+fi
 
 script/build-app.sh $@
