@@ -39,6 +39,16 @@
         document.body.appendChild(script);
         script.onload = function() {
             try {
+                // Restore the real process object globally, undoing the
+                // ClojureScript compiler's {env:{}} shim (see the stash
+                // comment above). LightTable's own code already goes
+                // through lt.util.process and is unaffected either way,
+                // but anything that reads window.process directly after
+                // this point — language plugins (e.g. the Clojure plugin's
+                // shelljs.which("java") JAVA_HOME/PATH lookup), other
+                // bundled npm libraries, and Electron's own internal
+                // <webview> code — needs the real object, not the shim.
+                window.process = window.__electronProcess;
                 lt.objs.app.init();
             } catch (e) {
                 console.error(e);
