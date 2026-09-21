@@ -13,6 +13,38 @@ is_setuid_root() {
   [ -u "$SANDBOX" ] && [ "$(stat -c '%U' "$SANDBOX" 2>/dev/null)" == "root" ]
 }
 
+# The Clojure plugin's bundled nREPL runner (lein-light-standalone.jar) embeds
+# Leiningen 2.5.2, whose dynapath references sun.misc.Launcher$ExtClassLoader -
+# removed in Java 9, so it fails on JDK 11/17/21 alike. Nothing else in Light
+# Table cares which JDK is around, so if a Java 8 is installed alongside the
+# system default, put it first on PATH for this process only. Set
+# LT_JAVA8_HOME to override, or to skip this entirely point it at a JDK 8 you
+# choose. Purely best-effort: if none is found we launch unchanged and the
+# editor works, only the Clojure client won't connect.
+find_java8() {
+  if [ -n "$LT_JAVA8_HOME" ] && [ -x "$LT_JAVA8_HOME/bin/java" ]; then
+    echo "$LT_JAVA8_HOME/bin"
+    return
+  fi
+  for candidate in /usr/lib/jvm/java-8-openjdk-*/bin \
+                   /usr/lib/jvm/jdk-8*/bin \
+                   /usr/lib/jvm/temurin-8-*/bin \
+                   /usr/lib/jvm/zulu-8*/bin; do
+    # Directory names lie; confirm from the version banner, which Java prints
+    # on stderr.
+    if [ -x "$candidate/java" ] &&
+       "$candidate/java" -version 2>&1 | grep -q '"1\.8\.'; then
+      echo "$candidate"
+      return
+    fi
+  done
+}
+
+JAVA8="$(find_java8)"
+if [ -n "$JAVA8" ]; then
+  export PATH="$JAVA8:$PATH"
+fi
+
 if [ -f "$SANDBOX" ] && ! is_setuid_root; then
   exec "$HERE/$BIN" --no-sandbox "$@"
 else

@@ -17,6 +17,7 @@ Prerequisites: Leiningen 2.1+, node.js + npm, git, a JDK (17 is the safest match
 - Recompile ClojureScript only, after editing `src/`: `lein cljsbuild once app`
   - On Windows, `script/build.sh` handles the `:source-map` workaround (issue #1025) itself and restores `project.clj` afterward; running `lein cljsbuild once app` directly does not need it.
 - Run without a full rebuild (assumes `script/build.sh` has run at least once): `script/light.sh`
+- Launch the packaged build on Windows with a Java 8 runtime on `PATH` so the Clojure plugin works: `script/light-windows.cmd` (double-clickable; auto-detects a JDK 8, `LT_JAVA8_HOME` overrides). The Linux `light` wrapper in the build does the same detection itself.
 - Build API docs locally (creates `codox/`, not for commit): `lein with-profile doc codox`
 - Rebuild `cljsDeps.js` (needed after a ClojureScript version upgrade, or after editing anything under `src-cljsdeps/`): `lein cljsbuild once cljsdeps` — `script/build.sh` already does this on every run, after `npm install` (which can otherwise wipe `deploy/core/node_modules/clojurescript/`).
 

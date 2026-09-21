@@ -102,14 +102,23 @@ the Clojure client. Install a JDK 8 alongside whatever you already have:
 sudo apt install openjdk-8-jdk
 ```
 
-Then either launch Light Table with that `java` first on `PATH` (still via
-the `./light` wrapper — see step 4):
+Once it is installed, **`./light` finds it for you** — the wrapper detects a
+Java 8 under `/usr/lib/jvm` and puts it first on `PATH` for that process
+only, leaving your system default alone. Set `LT_JAVA8_HOME` to override:
+
+```bash
+LT_JAVA8_HOME=/usr/lib/jvm/java-8-openjdk-amd64 ./light
+```
+
+If you launch `./LightTable` directly, or want to be explicit, you can
+prepend it yourself:
 
 ```bash
 PATH=/usr/lib/jvm/java-8-openjdk-amd64/bin:$PATH ./light
 ```
 
-or point just the Clojure client at it, in **Settings > User Behaviors**:
+You can also point just the Clojure client at it, in
+**Settings > User Behaviors**:
 
 ```clojure
 [:clojure.lang :lt.plugins.clojure/java-exe "/usr/lib/jvm/java-8-openjdk-amd64/bin/java"]
