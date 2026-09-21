@@ -262,6 +262,124 @@ Recorded honestly, because it is part of the cost:
 
 ---
 
+## Architecture: what is good, what is wrong, what would help
+
+### It is not overly complex — it is under-constrained
+
+A reasonable prior, on hitting bugs like these, is that the system must be
+baroque. The measurements say otherwise. The entire BOT core — objects,
+behaviors, tags, dispatch, hot re-apply — is **548 lines** in
+`src/lt/object.cljs` plus 134 in `src/lt/macros.cljc`. There is no framework
+bloat and no indirection for its own sake. The whole of `src/` is ~15,000
+lines across 69 files, and the individual namespaces are small and readable.
+
+The problem is the inverse of complexity: the codebase is **simple in the
+small and unanalyzable in the large**. There are 469 behaviors across 68
+core files, wired together through five global atoms by keyword names
+resolved at runtime, and — verified by inspection — **nothing anywhere
+validates that a named behavior or tag exists**.
+
+### The central flaw: decoupling without contracts
+
+BOT is maximally decoupled. Any behavior may attach to any tag, any object
+may raise any trigger, and nothing imports anything.
+
+That resembles modularity but is not. Modularity requires **interfaces** — a
+module promising something that can be checked. BOT has none: a trigger is a
+keyword, a behavior is a closure, and nothing declares what an object
+provides, what a trigger's payload looks like, or what a behavior requires.
+Decoupling without contracts is not modularity, only distance: all the cost
+of indirection (no call graph, `grep` misses usages, no compiler help) with
+none of the guarantee.
+
+Three consequences, all hit during this work:
+
+**Objects are unstructured god-maps.** An object is an atom holding an
+arbitrary map. Any behavior from any plugin may `merge!` any key into any
+object. No schema, no namespacing convention, no provenance. The Clojure
+plugin writes `:java-exe`, core writes `:ed`, and when `(:ed @obj)` returned
+nil there was no way to ask what was supposed to have set it.
+
+**Errors become log lines and the app keeps running.** `raise*` catches
+`:default` around every reaction and reports `Invalid behavior: X`. As a
+resilience choice for a live-editable editor this is defensible — one bad
+user behavior should not brick the app. Combined with the absence of
+validation, though, it makes a half-wired application a *normal, stable
+state*. Most of this work was conducted inside one.
+
+**Singleton objects held in vars fight the object system.** `(def clj-lang
+(object/create ::langs.clj))`, where `create` raises `:object.instant`
+*during* the `def`, so a reaction that reads the global sees `undefined`.
+The framework does the right thing — every reaction receives `this` — but
+the architecture permits two ways to name the same object and does nothing
+to discourage the broken one. See the `java-exe` wrinkle under "Current
+state".
+
+### What was genuinely good
+
+The core instincts were sound, and are worth preserving in any rework:
+
+- **Plugins use the identical mechanism as core.** No second-class extension
+  API, no reduced-surface sandbox. This is why a plugin can restyle the
+  editor or add a language as easily as core can. Most contemporaries got
+  this wrong.
+- **Data-file wiring is hot-reloadable.** Saving a `.behaviors` file
+  re-applies it live. The "edit your editor while using it" thesis worked.
+- **Namespaces are small and well factored.** The file-level organization is
+  better than most projects of this size.
+- **`:params` metadata already exists** on user behaviors to drive the
+  settings UI — the declaration machinery needed for validation is present
+  and simply unused for checking.
+
+### Improvements, cheapest first
+
+1. **Validate wiring at parse time.** Roughly an afternoon's work and by far
+   the highest value. When parsing `.behaviors`, warn on unknown behavior
+   names and unknown tags. This alone would have surfaced the entire
+   keyword-hash class immediately, along with an orphaned `::console-log`
+   rename found earlier in this upgrade. The single change most likely to
+   have prevented this whole episode.
+2. **Build plugins from source at install time.** Permanently eliminates the
+   compiled-ABI bug class described above. `script/build.sh` currently clones
+   a repo and uses its checked-in `*_compiled.js`.
+3. **Namespace object keys** — `::clj/java-exe` rather than `:java-exe`.
+   Idiomatic and cheap in ClojureScript; makes collisions impossible and
+   provenance greppable.
+4. **Use `this`; delete the singleton vars.** Behaviors already receive the
+   object they act on.
+5. **Commit a black-box smoke harness.** One was built ad hoc during this
+   work: CDP scripts driving a real packaged build and asserting on real DOM.
+   Roughly twenty assertions — app boots, editor renders, find works, a
+   behavior fires, a background worker returns — would cover most of the
+   value, starting from zero tests today.
+6. **Declare trigger payloads**, even as documentation-only metadata on the
+   `behavior` macro, so a trigger like `:eval!` has a stated shape.
+
+### Available simplifications
+
+- **Five global atoms could be one.** `obj-id`, `instances`, `object-defs`,
+  `behaviors` and `tags` are one registry with five keys; as five independent
+  atoms they are five independent opportunities to be inconsistent.
+- **`:listeners` is a denormalized cache** of tags→behaviors, recomputed on
+  every mutation and stored per object. It is a performance optimization that
+  creates a consistency hazard, and stale listeners were a recurring symptom
+  during this work. Compute on demand; memoize only if profiling justifies it.
+- **The `background` macro hand-marshals arguments** via `pr-str` /
+  `read-string` across a process boundary, with no schema, for three call
+  sites. This is exactly where the `Invalid arity: 3` bug lived.
+
+### Summary
+
+This is not a badly designed system. It is a research prototype that shipped
+and was subsequently *maintained* rather than *finished*. The dynamism was
+the whole point, and it bought something still rare: an editor where
+evaluation is woven into editing rather than bolted alongside it. What never
+arrived was the second half — the validation, contracts and tests that make a
+late-bound system maintainable rather than merely flexible. For five years of
+active use that trade was invisible. It came due all at once.
+
+---
+
 ## Current state
 
 Working, verified on Windows: editor and rendering, find/replace,
